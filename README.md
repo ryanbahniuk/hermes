@@ -1,16 +1,22 @@
 # Hermes
 
-A personal, local development harness. You hand it a **problem statement**; it decides which
-of your locally checked-out projects are relevant, spins up an isolated git worktree in each,
-and dispatches background agents (any model on AWS Bedrock) to work the problem in parallel —
-coordinating them through a shared contract so cross-repo changes stay consistent.
+A personal, local development harness. Its primary interface is an **interactive planning
+session**: you chat with a **planner agent** that clarifies requirements and — once the goal is
+clear — **delegates** to a swarm of background worker agents. The planner never edits code
+itself; it plans, investigates read-only, and dispatches. Workers run in isolated git worktrees
+across your locally checked-out projects, coordinated through a shared contract so cross-repo
+changes stay consistent.
 
-- **Model-agnostic** over Bedrock (Claude, Llama, Mistral, Nova, …); Anthropic models can also
-  run via the first-party API.
-- **Background agents** that survive your terminal closing, run in parallel, and are resumable.
+- **Interactive planner** as the front door (`hermes chat`, or just `hermes`) — an ongoing,
+  resumable conversation, not a fire-and-forget command.
+- **Model-agnostic** over Bedrock (Claude, Llama, Mistral, Nova, …) for both the planner and the
+  workers; Anthropic models can also run via the first-party API.
+- **Background worker agents** that survive your terminal closing, run in parallel, and are
+  resumable.
 - **CLI**, built on Bun + TypeScript.
 
-See [`docs/architecture.md`](docs/architecture.md) for the full design.
+New here? Read [`docs/model.md`](docs/model.md) for the mental model (Session → Run → Task) in
+five minutes. See [`docs/architecture.md`](docs/architecture.md) for the full design.
 
 ---
 
@@ -150,8 +156,26 @@ Key fields:
 
 ## Usage
 
+### The primary interface: a planning session
+
 ```bash
-# Kick off a run. Without --projects, the planner selects projects and authors a contract.
+hermes                      # open a planning session (bare command == `hermes chat`)
+hermes chat                 # same thing, explicit
+hermes chat --model claude-sonnet
+hermes chat --resume <sessionId>   # or: hermes --resume <sessionId>
+hermes sessions             # list your planning sessions
+```
+
+You then just talk to the planner. It asks clarifying questions, reads your projects
+(read-only) to ground itself, and when the goal is clear it calls its `delegate` tool to
+dispatch a worker swarm — which is exactly a `hermes run` under the hood. It reports progress
+back with `check_runs`, and you keep iterating. In-session commands: `/runs`, `/help`, `/exit`.
+The session is persisted, so it never disappears — resume it any time.
+
+### Driving the worker swarm directly (lower-level)
+
+```bash
+# Kick off a run. Without --projects, the run's planner selects projects and authors a contract.
 hermes run "Add a health-check endpoint and document it"
 hermes run "Bump the shared API version" --projects api,web   # explicit; skips the planner
 hermes run "…" --model claude-sonnet --backend bedrock
@@ -175,22 +199,30 @@ hermes project list
 hermes model list
 ```
 
-A `hermes run` returns immediately with a run id; a **detached supervisor process** does the
-work in the background (it survives your terminal closing). Worktrees are created under
-`~/.hermes/worktrees/<run>/<project>` and kept so you can review and merge the agents' changes.
+A `hermes run` (whether you type it or the planner delegates it) returns immediately with a run
+id; a **detached supervisor process** does the work in the background (it survives your terminal
+closing). Worktrees are created under `~/.hermes/worktrees/<run>/<project>` and kept so you can
+review and merge the agents' changes.
 
 ## How it works (in brief)
 
 ```
-hermes run "problem"  →  detached supervisor (one per run)
-   plan (powerful model: pick projects + author shared contract)
-     → fan out one agent per project (parallel, isolated worktrees)
-        → agents read the contract; may propose_amendment (adjudicated live)
-     → reconcile (summarize changes vs contract, surface amendments)
+hermes chat  →  interactive planning session (foreground, one planner agent)
+   ├─ clarifies requirements with you (multi-turn conversation, persisted + resumable)
+   ├─ investigates your projects read-only (it cannot edit code)
+   └─ delegate(problem[, projects, sharedContext])  ─┐  (a tool the planner calls)
+                                                      ▼
+   hermes run "problem"  →  detached supervisor (one per run)      ← also usable directly
+      plan (powerful model: pick projects + author shared contract)
+        → fan out one worker agent per project (parallel, isolated worktrees)
+           → workers read the contract; may propose_amendment (adjudicated live)
+        → reconcile (summarize changes vs contract, surface amendments)
 ```
 
-State lives in SQLite (`~/.hermes/hermes.db`); logs in `~/.hermes/logs/<run>/`. There is no
-always-on daemon — only active runs have a process.
+The planner runs on either runtime (claude via the Claude Agent SDK, or any Bedrock model via
+LangGraph), same as the workers. State lives in SQLite (`~/.hermes/hermes.db`) — including
+sessions and their transcripts; logs in `~/.hermes/logs/<run>/`. There is no always-on daemon —
+only the foreground chat and active runs have a process.
 
 ## Development
 

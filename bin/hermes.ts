@@ -13,6 +13,8 @@ import {
   getSharedContext,
   listAmendments,
   setSupervisorPid,
+  listSessions,
+  sessionTotalCost,
 } from "../src/db";
 import { resolveModel } from "../src/models/registry";
 import { spawnSupervisor, isAlive } from "../src/process/spawn";
@@ -43,6 +45,40 @@ const init = defineCommand({
         ? pc.dim(`  wrote starter config -> ${r.configPath}`)
         : pc.dim(`  config already exists -> ${r.configPath}`),
     );
+  }),
+});
+
+const chat = defineCommand({
+  meta: { name: "chat", description: "Interactive planning session with a planner agent (primary interface)" },
+  args: {
+    model: { type: "string", description: "Planner model name (or name@version)" },
+    resume: { type: "string", description: "Resume an existing session id" },
+  },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    const config = await loadConfig();
+    const { runChat } = await import("../src/cli/chat");
+    await runChat(config, {
+      modelRef: args.model as string | undefined,
+      resume: args.resume as string | undefined,
+    });
+  }),
+});
+
+const sessions = defineCommand({
+  meta: { name: "sessions", description: "List planning sessions" },
+  run: action(() => {
+    db();
+    const rows = listSessions();
+    if (rows.length === 0) return void console.log(pc.dim("No sessions yet. Start one with `hermes chat`."));
+    for (const s of rows) {
+      const live = s.status === "active" ? pc.green("active") : pc.dim("closed");
+      const cost = sessionTotalCost(s.id);
+      console.log(
+        `${pc.bold(s.id)}  ${live}  ${pc.dim(`$${cost.total.toFixed(4)}`)}` +
+          pc.dim(` (plan $${cost.planner.toFixed(4)} + work $${cost.work.toFixed(4)})`) +
+          `  ${pc.dim(s.planner_model ?? "-")}  ${s.title ?? pc.dim("(untitled)")}`,
+      );
+    }
   }),
 });
 
@@ -315,9 +351,38 @@ const superviseCmd = defineCommand({
   }),
 });
 
+const subCommands = {
+  chat,
+  sessions,
+  init,
+  run,
+  agent,
+  runs,
+  ps,
+  logs,
+  stop,
+  resume,
+  show,
+  watch,
+  model,
+  project,
+  __supervise: superviseCmd,
+};
+
 const main = defineCommand({
   meta: { name: "hermes", description: "Personal local development harness" },
-  subCommands: { init, run, agent, runs, ps, logs, stop, resume, show, watch, model, project, __supervise: superviseCmd },
+  subCommands,
 });
+
+// The primary interface is the planning chat: a bare `hermes` (or one with only
+// leading flags, e.g. `hermes --resume <id>`) opens a session. We inject the
+// `chat` subcommand rather than using citty's parent `run`, because citty always
+// runs a command's `run` *in addition to* any matched subcommand.
+const rawArgs = process.argv.slice(2);
+const wantsMeta = rawArgs.some((a) => a === "--help" || a === "-h" || a === "--version");
+const noSubCommand = rawArgs.length === 0 || (rawArgs[0]?.startsWith("-") ?? false);
+if (!wantsMeta && noSubCommand) {
+  process.argv.splice(2, 0, "chat");
+}
 
 runMain(main);

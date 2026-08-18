@@ -11,7 +11,7 @@ import { createHermesTools } from "../tools/hermes-tools";
 import { createHermesCoordinationTools } from "../tools/coordination";
 import type { AgentEvent, AgentRuntime, AgentTask } from "./types";
 
-function contentToText(content: unknown): string {
+export function contentToText(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
@@ -106,7 +106,7 @@ export class HermesRuntime implements AgentRuntime {
   }
 }
 
-function* eventsFor(m: BaseMessage): Generator<AgentEvent> {
+export function* eventsFor(m: BaseMessage): Generator<AgentEvent> {
   if (m instanceof AIMessage) {
     const usage = (
       m as {
