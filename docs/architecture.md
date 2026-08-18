@@ -158,7 +158,7 @@ hermes chat   (foreground; `hermes` with no subcommand does the same)
    │    · check_runs                                       — report swarm progress
    │
    └─ delegate → createRun (tagged session_id) + optional pre-created tasks + spawnSupervisor
-                  → the exact same detached supervisor path as `hermes run`
+                  → the detached supervisor path (the only way work is kicked off)
 ```
 
 - **Model-agnostic like the workers.** The planner is a `PlannerRuntime` with two
@@ -170,21 +170,21 @@ hermes chat   (foreground; `hermes` with no subcommand does the same)
   root + the read allowlist, with *no* writable worktree. The `claude` planner denies
   Write/Edit/Bash via a `PreToolUse` hook (reads are path-checked); the `hermes` planner is
   simply given only read tools. Work happens only through `delegate`.
-- **Delegation is the bridge, not a new mechanism.** `delegate` reuses the run/supervisor/worker
-  machinery verbatim; a delegated run is indistinguishable from a CLI `hermes run` except for its
-  `session_id` tag. The planner may name projects + per-project subtasks explicitly (it has
-  conversation context) or omit them and let the supervisor's own planner select.
+- **Delegation is the only entry point.** `delegate` drives the run/supervisor/worker machinery;
+  a delegated run carries a `session_id` tag. There is no public CLI command to start a run — a
+  session is the sole way to kick off work. The planner may name projects + per-project subtasks
+  explicitly (it has conversation context) or omit them and let the supervisor's own planner select.
 - **Persisted + resumable.** Sessions, their transcripts, resume handle, and rolled-up cost live
   in SQLite. `hermes chat --resume <id>` reopens the conversation; `hermes sessions` lists them.
 
 ## Execution model
 
-`hermes run` returns instantly with a run ID; everything real happens in a **detached
+`delegate` returns instantly with a run ID; everything real happens in a **detached
 supervisor process, one per run**, that survives the terminal closing and exits when the run
 finishes.
 
 ```
-hermes run "problem"  ─────────────────────────────►  returns run ID immediately
+delegate("problem")  ──────────────────────────────►  returns run ID immediately
    │
    └─ detached SUPERVISOR PROCESS (one per run) — plain-TS orchestrator
         │
@@ -225,8 +225,8 @@ There is **no always-on `hermes` daemon** — zero background footprint when idl
 **one ephemeral supervisor process per active run**, which self-terminates when the run ends.
 
 ```
-$ hermes run "fix the thing"
-   │  CLI: write a run row to SQLite, spawn a DETACHED child, print run ID, EXIT.
+delegate("fix the thing")   ← from a planning session
+   │  write a run row to SQLite, spawn a DETACHED child, return run ID.
    ▼
    bun bin/supervisor.ts <runId>     ← detached background process
       • own session (setsid) → closing the terminal doesn't kill it
@@ -397,8 +397,8 @@ runs.session_id  text       -- nullable; links a delegated swarm back to its ses
 ```
 hermes [chat] [--model <name>] [--resume <sessionId>]       # primary interface: planning session
 hermes sessions                                             # list planning sessions
+                                                            # (work is kicked off only via a session's delegate)
 
-hermes run "<problem>" [--projects a,b] [--model <name>] [--backend bedrock|anthropic]  # kick off a run (async)
 hermes runs [--status <s>]                                  # list runs
 hermes ps [<run>]                                           # list tasks/agents
 hermes show <run>                                           # detail: context, amendments, diffs

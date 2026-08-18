@@ -40,10 +40,10 @@ export interface PlannerActions {
 }
 
 /**
- * Builds the planner actions for one session. `delegate` reuses the exact
- * `hermes run` machinery (create run + tasks + detached supervisor) so a
- * dispatched swarm is indistinguishable from a CLI-launched run — only tagged
- * with the originating `sessionId`.
+ * Builds the planner actions for one session. `delegate` drives the run
+ * machinery directly (create run + tasks + detached supervisor); a dispatched
+ * swarm is an ordinary run, tagged with the originating `sessionId`. Sessions
+ * are the only public way to kick off work.
  */
 export function createPlannerActions(
   config: HermesConfig,

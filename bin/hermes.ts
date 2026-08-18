@@ -4,8 +4,6 @@ import pc from "picocolors";
 import { loadConfig } from "../src/config/load";
 import {
   db,
-  createRun,
-  createTask,
   listRuns,
   listTasks,
   getRun,
@@ -16,11 +14,9 @@ import {
   listSessions,
   sessionTotalCost,
 } from "../src/db";
-import { resolveModel } from "../src/models/registry";
 import { spawnSupervisor, isAlive } from "../src/process/spawn";
 import { followLog, readLog, runLogFile, taskLogFile } from "../src/logging/logs";
 import { initHome } from "../src/init";
-import { runSingleTask } from "../src/orchestrator/single";
 import { supervise } from "../src/orchestrator/supervise";
 
 /** Wraps a command body so thrown errors print as one clean red line. */
@@ -79,96 +75,6 @@ const sessions = defineCommand({
           `  ${pc.dim(s.planner_model ?? "-")}  ${s.title ?? pc.dim("(untitled)")}`,
       );
     }
-  }),
-});
-
-const run = defineCommand({
-  meta: { name: "run", description: "Kick off a run (async)" },
-  args: {
-    problem: { type: "positional", required: true, description: "Problem statement (quote it)" },
-    projects: { type: "string", description: "Comma-separated project names (skip planner)" },
-    model: { type: "string", description: "Planner model name (or name@version)" },
-    backend: { type: "string", description: "Backend override: bedrock | anthropic" },
-  },
-  run: action(async ({ args }: { args: Record<string, unknown> }) => {
-    const config = await loadConfig();
-    db();
-
-    const problem = String(args.problem);
-    const projectsArg = args.projects as string | undefined;
-
-    // Planner model reference (also drives implementers when --projects is used).
-    const plannerRef =
-      (args.model as string | undefined) ?? config.defaults.plannerModel;
-    if (!plannerRef) throw new Error(`No model given and no defaults.plannerModel configured.`);
-    // Validate it resolves (and any --backend override).
-    resolveModel(config, plannerRef, args.backend as "bedrock" | "anthropic" | undefined);
-
-    const r = createRun({ problem, plannerModel: plannerRef });
-
-    let note: string;
-    if (projectsArg) {
-      // Explicit selection: skip the planner, create a task per project now.
-      const names = projectsArg.split(",").map((s) => s.trim()).filter(Boolean);
-      for (const n of names) {
-        if (!config.projects.find((p) => p.name === n)) {
-          const known = config.projects.map((p) => p.name).join(", ") || "(none)";
-          throw new Error(`Unknown project "${n}". Configured: ${known}`);
-        }
-      }
-      const implRef =
-        (args.model as string | undefined) ??
-        config.defaults.implementerModel ??
-        config.defaults.plannerModel!;
-      const implModel = resolveModel(config, implRef, args.backend as "bedrock" | "anthropic" | undefined);
-      const implLabel = `${implModel.name}@${implModel.version}`;
-      for (const n of names) {
-        createTask({ runId: r.id, projectName: n, model: implLabel, runtime: implModel.runtime, prompt: problem });
-      }
-      note = `${names.length} task(s)`;
-    } else {
-      // No selection: the supervisor's planner will choose projects.
-      note = "planner will select projects";
-    }
-
-    const pid = spawnSupervisor(r.id);
-    setSupervisorPid(r.id, pid);
-    console.log(pc.green(`Started ${pc.bold(r.id)}`) + pc.dim(`  (supervisor pid ${pid}, ${note})`));
-    console.log(pc.dim(`  hermes logs ${r.id} -f`));
-  }),
-});
-
-const agent = defineCommand({
-  meta: { name: "agent", description: "Run a single project agent in the foreground (dev)" },
-  args: {
-    problem: { type: "positional", required: true, description: "Problem statement (quote it)" },
-    project: { type: "string", required: true, description: "Project name from your config" },
-    model: { type: "string", description: "Model name (or name@version)" },
-    backend: { type: "string", description: "Backend override: bedrock | anthropic" },
-    keep: { type: "boolean", default: false, description: "Keep the worktree after finishing" },
-  },
-  run: action(async ({ args }: { args: Record<string, unknown> }) => {
-    const config = await loadConfig();
-    db();
-    const res = await runSingleTask({
-      config,
-      projectName: String(args.project),
-      problem: String(args.problem),
-      modelRef: args.model as string | undefined,
-      backend: args.backend as "bedrock" | "anthropic" | undefined,
-      keepWorktree: Boolean(args.keep),
-      onEvent: (line) => console.log(pc.dim(line)),
-    });
-    console.log();
-    console.log(
-      pc.green(`✓ ${res.runId} / ${res.taskId}`) +
-        pc.dim(
-          `  (in=${res.tokens.input} out=${res.tokens.output} cacheR=${res.tokens.cacheRead} cacheW=${res.tokens.cacheWrite}, ` +
-            `$${res.cost.toFixed(4)} ${res.costSource})`,
-        ),
-    );
-    console.log(pc.bold("Summary: ") + res.summary);
-    if (args.keep && res.worktree) console.log(pc.dim(`worktree kept: ${res.worktree.path}`));
   }),
 });
 
@@ -355,8 +261,6 @@ const subCommands = {
   chat,
   sessions,
   init,
-  run,
-  agent,
   runs,
   ps,
   logs,

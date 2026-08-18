@@ -168,18 +168,17 @@ hermes sessions             # list your planning sessions
 
 You then just talk to the planner. It asks clarifying questions, reads your projects
 (read-only) to ground itself, and when the goal is clear it calls its `delegate` tool to
-dispatch a worker swarm — which is exactly a `hermes run` under the hood. It reports progress
-back with `check_runs`, and you keep iterating. In-session commands: `/runs`, `/help`, `/exit`.
-The session is persisted, so it never disappears — resume it any time.
+dispatch a worker swarm — a background run. It reports progress back with `check_runs`, and you
+keep iterating. In-session commands: `/runs`, `/help`, `/exit`. The session is persisted, so it
+never disappears — resume it any time.
 
-### Driving the worker swarm directly (lower-level)
+Sessions are the only way to kick off work. There is no direct "start a run" command — you
+delegate from within a planning session. The commands below are read-only inspection and
+lifecycle control over runs a session has already dispatched.
+
+### Inspecting and controlling dispatched runs
 
 ```bash
-# Kick off a run. Without --projects, the run's planner selects projects and authors a contract.
-hermes run "Add a health-check endpoint and document it"
-hermes run "Bump the shared API version" --projects api,web   # explicit; skips the planner
-hermes run "…" --model claude-sonnet --backend bedrock
-
 # Inspect
 hermes runs                 # list runs (running / stalled / done / failed + cost)
 hermes ps [<run>]           # list tasks/agents
@@ -191,18 +190,14 @@ hermes watch                # live Ink dashboard (press q to quit)
 hermes stop <run>           # SIGTERM the run's supervisor
 hermes resume <run>         # re-run a run's incomplete tasks
 
-# Single-project foreground run (dev/debugging), streams to your terminal
-hermes agent "Refactor the config loader" --project api --keep
-
 # Registries
 hermes project list
 hermes model list
 ```
 
-A `hermes run` (whether you type it or the planner delegates it) returns immediately with a run
-id; a **detached supervisor process** does the work in the background (it survives your terminal
-closing). Worktrees are created under `~/.hermes/worktrees/<run>/<project>` and kept so you can
-review and merge the agents' changes.
+A delegated run returns immediately with a run id; a **detached supervisor process** does the
+work in the background (it survives your terminal closing). Worktrees are created under
+`~/.hermes/worktrees/<run>/<project>` and kept so you can review and merge the agents' changes.
 
 ## How it works (in brief)
 
@@ -212,7 +207,7 @@ hermes chat  →  interactive planning session (foreground, one planner agent)
    ├─ investigates your projects read-only (it cannot edit code)
    └─ delegate(problem[, projects, sharedContext])  ─┐  (a tool the planner calls)
                                                       ▼
-   hermes run "problem"  →  detached supervisor (one per run)      ← also usable directly
+                          detached supervisor (one per run)
       plan (powerful model: pick projects + author shared contract)
         → fan out one worker agent per project (parallel, isolated worktrees)
            → workers read the contract; may propose_amendment (adjudicated live)
