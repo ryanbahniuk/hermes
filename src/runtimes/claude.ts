@@ -6,17 +6,19 @@ import {
   type PermissionResult,
   type PreToolUseHookInput,
   type SDKAssistantMessage,
+  type SDKResultMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { assertReadable, assertWritable, type Scoping } from "../tools/ops";
 import { defaultRegion } from "../models/chat";
+import type { ResolvedModel } from "../models/registry";
 import { createClaudeCoordinationServer } from "../tools/coordination";
 import type { AgentEvent, AgentRuntime, AgentTask } from "./types";
 
 // Tools we don't want a background implementation agent reaching for.
 const DISALLOWED_TOOLS = ["WebSearch", "WebFetch", "Task"];
 
-const READ_PATH_FIELDS: Record<string, string[]> = {
+export const READ_PATH_FIELDS: Record<string, string[]> = {
   Read: ["file_path"],
   Grep: ["path"],
   Glob: ["path"],
@@ -47,9 +49,10 @@ function scopeViolation(scoping: Scoping, toolName: string, toolInput: unknown):
   return null;
 }
 
-function bedrockEnv(task: AgentTask): Record<string, string> {
+/** Environment for a Claude Agent SDK query: Bedrock vs. first-party Anthropic API. */
+export function bedrockEnvForModel(model: ResolvedModel): Record<string, string> {
   const base = process.env as Record<string, string>;
-  if (task.model.target.kind === "bedrock") {
+  if (model.target.kind === "bedrock") {
     return {
       ...base,
       CLAUDE_CODE_USE_BEDROCK: "1",
@@ -65,10 +68,17 @@ function bedrockEnv(task: AgentTask): Record<string, string> {
   return env;
 }
 
+/** The SDK model id: Bedrock inference profile or Anthropic API model id. */
+export function modelIdForModel(model: ResolvedModel): string {
+  return model.target.kind === "bedrock" ? model.target.inferenceProfile : model.target.apiModelId;
+}
+
+function bedrockEnv(task: AgentTask): Record<string, string> {
+  return bedrockEnvForModel(task.model);
+}
+
 function modelId(task: AgentTask): string {
-  return task.model.target.kind === "bedrock"
-    ? task.model.target.inferenceProfile
-    : task.model.target.apiModelId;
+  return modelIdForModel(task.model);
 }
 
 function systemAppend(task: AgentTask): string {
@@ -157,14 +167,8 @@ export class ClaudeRuntime implements AgentRuntime {
         } else if (msg.type === "user") {
           yield* fromUser(msg);
         } else if (msg.type === "result") {
-          // modelUsage carries the authoritative cumulative per-model totals.
-          yield { type: "usage", ...sumModelUsage(msg.modelUsage) };
-          yield { type: "cost", usd: msg.total_cost_usd };
-          if (msg.subtype === "success") {
-            summary = msg.result || summary;
-          } else {
-            yield { type: "error", message: `agent ended abnormally: ${msg.subtype}` };
-          }
+          yield* eventsFromClaudeResult(msg);
+          if (msg.subtype === "success") summary = msg.result || summary;
         }
       }
 
@@ -175,7 +179,17 @@ export class ClaudeRuntime implements AgentRuntime {
   }
 }
 
-function sumModelUsage(modelUsage: Record<string, ModelUsage> | undefined): {
+/** Usage + cost (+ abnormal-end error) events from an SDK result message. */
+export function* eventsFromClaudeResult(msg: SDKResultMessage): Generator<AgentEvent> {
+  // modelUsage carries the authoritative cumulative per-model totals.
+  yield { type: "usage", ...sumModelUsage(msg.modelUsage) };
+  yield { type: "cost", usd: msg.total_cost_usd };
+  if (msg.subtype !== "success") {
+    yield { type: "error", message: `agent ended abnormally: ${msg.subtype}` };
+  }
+}
+
+export function sumModelUsage(modelUsage: Record<string, ModelUsage> | undefined): {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -194,7 +208,7 @@ function sumModelUsage(modelUsage: Record<string, ModelUsage> | undefined): {
   return { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens };
 }
 
-function* fromAssistant(msg: SDKAssistantMessage): Generator<AgentEvent> {
+export function* fromAssistant(msg: SDKAssistantMessage): Generator<AgentEvent> {
   const content = (msg.message as { content?: unknown }).content;
   if (!Array.isArray(content)) return;
   for (const block of content as Array<Record<string, unknown>>) {
@@ -206,7 +220,7 @@ function* fromAssistant(msg: SDKAssistantMessage): Generator<AgentEvent> {
   }
 }
 
-function* fromUser(msg: SDKUserMessage): Generator<AgentEvent> {
+export function* fromUser(msg: SDKUserMessage): Generator<AgentEvent> {
   const content = (msg.message as { content?: unknown }).content;
   if (!Array.isArray(content)) return;
   for (const block of content as Array<Record<string, unknown>>) {

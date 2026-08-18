@@ -67,6 +67,35 @@ const migrations: Migration[] = [
     name: "task_prompt",
     sql: `ALTER TABLE tasks ADD COLUMN prompt TEXT;`,
   },
+  {
+    version: 3,
+    name: "planning_sessions",
+    sql: `
+      CREATE TABLE sessions (
+        id             TEXT PRIMARY KEY,
+        title          TEXT,
+        planner_model  TEXT,
+        runtime        TEXT,
+        resume_ref     TEXT,          -- claude SDK session id (null for hermes)
+        status         TEXT NOT NULL, -- active | closed
+        cost           REAL NOT NULL DEFAULT 0,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+      );
+
+      CREATE TABLE session_messages (
+        id         TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        role       TEXT NOT NULL,     -- user | assistant
+        content    TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_session_messages_session ON session_messages(session_id);
+
+      ALTER TABLE runs ADD COLUMN session_id TEXT;
+    `,
+  },
 ];
 
 /** Applies any pending migrations in a single transaction. */

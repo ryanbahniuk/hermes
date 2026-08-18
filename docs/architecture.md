@@ -139,6 +139,44 @@ behaves identically regardless of model.
 
 ---
 
+## Planning sessions (the primary interface)
+
+The front door to Hermes is an **interactive planning session**, not a one-shot command. You
+converse with a **planner agent** whose sole job is to clarify requirements and **delegate** —
+it never edits code. This keeps the powerful, expensive model on planning and hands the actual
+work to a swarm of (possibly cheaper) workers.
+
+```
+hermes chat   (foreground; `hermes` with no subcommand does the same)
+   │  PlannerSession: one persisted `sessions` row + one long-lived PlannerRuntime instance
+   │
+   ├─ turn ↔ turn conversation with the user (transcript persisted to `session_messages`)
+   │
+   ├─ tools available to the planner:
+   │    · list_projects / read_file / search / list_dir  — read-only investigation
+   │    · delegate(problem[, projects, sharedContext])    — dispatch a worker swarm
+   │    · check_runs                                       — report swarm progress
+   │
+   └─ delegate → createRun (tagged session_id) + optional pre-created tasks + spawnSupervisor
+                  → the exact same detached supervisor path as `hermes run`
+```
+
+- **Model-agnostic like the workers.** The planner is a `PlannerRuntime` with two
+  implementations mirroring the `AgentRuntime` split: `claude` (Claude Agent SDK, resumed per
+  turn via the SDK session id) and `hermes` (LangGraph react agent; conversation state kept as
+  an in-process message list, seeded from the persisted transcript on resume). `selectPlannerRuntime`
+  picks by the planner model's runtime.
+- **Read-only by construction.** The planner's filesystem scope spans every configured project
+  root + the read allowlist, with *no* writable worktree. The `claude` planner denies
+  Write/Edit/Bash via a `PreToolUse` hook (reads are path-checked); the `hermes` planner is
+  simply given only read tools. Work happens only through `delegate`.
+- **Delegation is the bridge, not a new mechanism.** `delegate` reuses the run/supervisor/worker
+  machinery verbatim; a delegated run is indistinguishable from a CLI `hermes run` except for its
+  `session_id` tag. The planner may name projects + per-project subtasks explicitly (it has
+  conversation context) or omit them and let the supervisor's own planner select.
+- **Persisted + resumable.** Sessions, their transcripts, resume handle, and rolled-up cost live
+  in SQLite. `hermes chat --resume <id>` reopens the conversation; `hermes sessions` lists them.
+
 ## Execution model
 
 `hermes run` returns instantly with a run ID; everything real happens in a **detached
@@ -300,6 +338,25 @@ amendments
   resolution    text  -- adjudicator note
   created_at, resolved_at
 
+sessions                    -- planning conversations (the primary interface)
+  id            text  pk
+  title         text        -- derived from the first user message
+  planner_model text
+  runtime       text        -- 'claude' | 'hermes'
+  resume_ref    text        -- claude SDK session id (null for hermes)
+  status        text        -- active | closed
+  cost          real        -- rolled up across planner turns
+  created_at, updated_at
+
+session_messages            -- persisted transcript, for resume + replay
+  id            text  pk
+  session_id    text  fk -> sessions.id
+  role          text        -- user | assistant
+  content       text
+  created_at
+
+runs.session_id  text       -- nullable; links a delegated swarm back to its session
+
 -- plus LangGraph checkpoint tables (better-sqlite3), used only by HermesRuntime tasks
 ```
 
@@ -335,6 +392,9 @@ amendments
 ## CLI surface (citty)
 
 ```
+hermes [chat] [--model <name>] [--resume <sessionId>]       # primary interface: planning session
+hermes sessions                                             # list planning sessions
+
 hermes run "<problem>" [--projects a,b] [--model <name>] [--backend bedrock|anthropic]  # kick off a run (async)
 hermes runs [--status <s>]                                  # list runs
 hermes ps [<run>]                                           # list tasks/agents
@@ -358,9 +418,11 @@ bin/
   hermes.ts          # CLI entry (citty), Bun shebang
   supervisor.ts      # detached supervisor entrypoint: `bun supervisor.ts <runId>`
 src/
-  cli/               # citty commands + Ink dashboard + clack prompts
+  cli/               # citty commands + Ink dashboard + chat REPL (cli/chat.ts)
   config/            # load hermes.config.ts; project/model registries; allowlist
   models/            # registry resolution → { runtime, inferenceProfile }
+  planner/           # planning sessions: PlannerRuntime (claude|hermes), actions,
+                     #   delegation/read-only tools, session orchestration
   orchestrator/      # plain-TS supervisor: plan, fanout, adjudicate, reconcile
   runtimes/
     index.ts         # AgentRuntime interface + selection

@@ -18,6 +18,8 @@ export type TaskStatus =
   | "done"
   | "failed";
 
+export type SessionStatus = "active" | "closed";
+
 export interface RunRow {
   id: string;
   problem: string;
@@ -25,8 +27,29 @@ export interface RunRow {
   planner_model: string | null;
   cost: number;
   supervisor_pid: number | null;
+  session_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface SessionRow {
+  id: string;
+  title: string | null;
+  planner_model: string | null;
+  runtime: string | null;
+  resume_ref: string | null;
+  status: SessionStatus;
+  cost: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SessionMessageRow {
+  id: string;
+  session_id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
 }
 
 export interface TaskRow {
@@ -47,16 +70,27 @@ export interface TaskRow {
 
 // ---- runs -----------------------------------------------------------------
 
-export function createRun(input: { problem: string; plannerModel?: string | null }): RunRow {
+export function createRun(input: {
+  problem: string;
+  plannerModel?: string | null;
+  sessionId?: string | null;
+}): RunRow {
   const runId = id("run");
   const now = nowIso();
   getDb()
     .prepare(
-      `INSERT INTO runs (id, problem, status, planner_model, cost, supervisor_pid, created_at, updated_at)
-       VALUES (?, ?, 'planning', ?, 0, NULL, ?, ?)`,
+      `INSERT INTO runs (id, problem, status, planner_model, cost, supervisor_pid, session_id, created_at, updated_at)
+       VALUES (?, ?, 'planning', ?, 0, NULL, ?, ?, ?)`,
     )
-    .run(runId, input.problem, input.plannerModel ?? null, now, now);
+    .run(runId, input.problem, input.plannerModel ?? null, input.sessionId ?? null, now, now);
   return getRun(runId)!;
+}
+
+/** Runs dispatched by a given planning session, newest first. */
+export function listRunsBySession(sessionId: string): RunRow[] {
+  return getDb()
+    .prepare(`SELECT * FROM runs WHERE session_id = ? ORDER BY created_at DESC`)
+    .all(sessionId) as RunRow[];
 }
 
 export function getRun(runId: string): RunRow | undefined {
@@ -211,4 +245,81 @@ export function setRunCost(runId: string, cost: number): void {
   getDb()
     .prepare(`UPDATE runs SET cost = ?, updated_at = ? WHERE id = ?`)
     .run(cost, nowIso(), runId);
+}
+
+// ---- planning sessions ----------------------------------------------------
+
+export function createSession(input: {
+  plannerModel?: string | null;
+  runtime?: string | null;
+  title?: string | null;
+}): SessionRow {
+  const sessionId = id("sess");
+  const now = nowIso();
+  getDb()
+    .prepare(
+      `INSERT INTO sessions (id, title, planner_model, runtime, resume_ref, status, cost, created_at, updated_at)
+       VALUES (?, ?, ?, ?, NULL, 'active', 0, ?, ?)`,
+    )
+    .run(sessionId, input.title ?? null, input.plannerModel ?? null, input.runtime ?? null, now, now);
+  return getSession(sessionId)!;
+}
+
+export function getSession(sessionId: string): SessionRow | undefined {
+  return getDb().prepare(`SELECT * FROM sessions WHERE id = ?`).get(sessionId) as
+    | SessionRow
+    | undefined;
+}
+
+export function listSessions(): SessionRow[] {
+  return getDb().prepare(`SELECT * FROM sessions ORDER BY updated_at DESC`).all() as SessionRow[];
+}
+
+export function setSessionResumeRef(sessionId: string, ref: string): void {
+  getDb()
+    .prepare(`UPDATE sessions SET resume_ref = ?, updated_at = ? WHERE id = ?`)
+    .run(ref, nowIso(), sessionId);
+}
+
+export function setSessionTitle(sessionId: string, title: string): void {
+  getDb()
+    .prepare(`UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?`)
+    .run(title, nowIso(), sessionId);
+}
+
+export function setSessionStatus(sessionId: string, status: SessionStatus): void {
+  getDb()
+    .prepare(`UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?`)
+    .run(status, nowIso(), sessionId);
+}
+
+/** Adds `delta` USD to a session's rolled-up cost; returns the new total. */
+export function addSessionCost(sessionId: string, delta: number): number {
+  getDb()
+    .prepare(`UPDATE sessions SET cost = cost + ?, updated_at = ? WHERE id = ?`)
+    .run(delta, nowIso(), sessionId);
+  return (getSession(sessionId)?.cost ?? 0) as number;
+}
+
+export function addSessionMessage(input: {
+  sessionId: string;
+  role: "user" | "assistant";
+  content: string;
+}): SessionMessageRow {
+  const messageId = id("msg");
+  getDb()
+    .prepare(
+      `INSERT INTO session_messages (id, session_id, role, content, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(messageId, input.sessionId, input.role, input.content, nowIso());
+  return getDb()
+    .prepare(`SELECT * FROM session_messages WHERE id = ?`)
+    .get(messageId) as SessionMessageRow;
+}
+
+export function listSessionMessages(sessionId: string): SessionMessageRow[] {
+  return getDb()
+    .prepare(`SELECT * FROM session_messages WHERE session_id = ? ORDER BY created_at`)
+    .all(sessionId) as SessionMessageRow[];
 }
