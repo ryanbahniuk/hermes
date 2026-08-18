@@ -1,0 +1,9 @@
+node_modules/
+*.db
+*.db-wal
+*.db-shm
+.hermes/
+.hermes-test/
+.context/
+dist/
+*.log
