@@ -2,7 +2,7 @@ import * as readline from "node:readline";
 import { stdin, stdout } from "node:process";
 import pc from "picocolors";
 import type { HermesConfig } from "../config/schema";
-import { db, getSession, listRunsBySession } from "../db";
+import { db, listRunsBySession, sessionTotalCost } from "../db";
 import { isAlive } from "../process/spawn";
 import { PlannerSession } from "../planner/session";
 import type { PlannerEvent } from "../planner/runtime";
@@ -117,8 +117,12 @@ export async function runChat(
     } catch (err) {
       stdout.write(pc.red(`  error: ${(err as Error).message}`) + "\n");
     }
-    const cost = getSession(session.id)?.cost ?? 0;
-    stdout.write(pc.dim(`  ── session cost $${cost.toFixed(4)}\n\n`));
+    const cost = sessionTotalCost(session.id);
+    stdout.write(
+      pc.dim(
+        `  ── session cost $${cost.total.toFixed(4)} (planning $${cost.planner.toFixed(4)} + work $${cost.work.toFixed(4)})\n\n`,
+      ),
+    );
     prompt();
   }
   rl.close();

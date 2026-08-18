@@ -345,7 +345,10 @@ sessions                    -- planning conversations (the primary interface)
   runtime       text        -- 'claude' | 'hermes'
   resume_ref    text        -- claude SDK session id (null for hermes)
   status        text        -- active | closed
-  cost          real        -- rolled up across planner turns
+  cost          real        -- planner-conversation cost only; the session TOTAL
+                            --   (planner + every delegated task's cost) is derived
+                            --   on read by sessionTotalCost, never stored, so
+                            --   background runs stay authoritative for their cost
   created_at, updated_at
 
 session_messages            -- persisted transcript, for resume + replay

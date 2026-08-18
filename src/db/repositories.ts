@@ -293,12 +293,44 @@ export function setSessionStatus(sessionId: string, status: SessionStatus): void
     .run(status, nowIso(), sessionId);
 }
 
-/** Adds `delta` USD to a session's rolled-up cost; returns the new total. */
+/**
+ * Adds `delta` USD to a session's *planner-conversation* cost (the `sessions.cost`
+ * column). The cost of delegated work is tracked on tasks/runs and folded in at
+ * read time by `sessionTotalCost` — not stored here, so background runs stay the
+ * single source of truth for their own cost. Returns the new planner cost.
+ */
 export function addSessionCost(sessionId: string, delta: number): number {
   getDb()
     .prepare(`UPDATE sessions SET cost = cost + ?, updated_at = ? WHERE id = ?`)
     .run(delta, nowIso(), sessionId);
   return (getSession(sessionId)?.cost ?? 0) as number;
+}
+
+export interface SessionCost {
+  /** Cost of the planning conversation itself (planner turns). */
+  planner: number;
+  /** Aggregate cost of every task across every run this session dispatched. */
+  work: number;
+  /** planner + work — the total spend attributable to the session. */
+  total: number;
+}
+
+/**
+ * The session's true cost: the planning conversation plus the aggregate cost of
+ * all runs/tasks it spawned. Derived on read (summing leaf task costs) so it
+ * always reflects what background workers have reported.
+ */
+export function sessionTotalCost(sessionId: string): SessionCost {
+  const planner = getSession(sessionId)?.cost ?? 0;
+  const row = getDb()
+    .prepare(
+      `SELECT COALESCE(SUM(t.cost), 0) AS c
+         FROM tasks t JOIN runs r ON t.run_id = r.id
+        WHERE r.session_id = ?`,
+    )
+    .get(sessionId) as { c: number };
+  const work = row.c;
+  return { planner, work, total: planner + work };
 }
 
 export function addSessionMessage(input: {

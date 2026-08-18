@@ -14,6 +14,7 @@ import {
   listAmendments,
   setSupervisorPid,
   listSessions,
+  sessionTotalCost,
 } from "../src/db";
 import { resolveModel } from "../src/models/registry";
 import { spawnSupervisor, isAlive } from "../src/process/spawn";
@@ -71,8 +72,11 @@ const sessions = defineCommand({
     if (rows.length === 0) return void console.log(pc.dim("No sessions yet. Start one with `hermes chat`."));
     for (const s of rows) {
       const live = s.status === "active" ? pc.green("active") : pc.dim("closed");
+      const cost = sessionTotalCost(s.id);
       console.log(
-        `${pc.bold(s.id)}  ${live}  ${pc.dim(`$${s.cost.toFixed(4)}`)}  ${pc.dim(s.planner_model ?? "-")}  ${s.title ?? pc.dim("(untitled)")}`,
+        `${pc.bold(s.id)}  ${live}  ${pc.dim(`$${cost.total.toFixed(4)}`)}` +
+          pc.dim(` (plan $${cost.planner.toFixed(4)} + work $${cost.work.toFixed(4)})`) +
+          `  ${pc.dim(s.planner_model ?? "-")}  ${s.title ?? pc.dim("(untitled)")}`,
       );
     }
   }),

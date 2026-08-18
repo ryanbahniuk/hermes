@@ -15,7 +15,8 @@ changes stay consistent.
   resumable.
 - **CLI**, built on Bun + TypeScript.
 
-See [`docs/architecture.md`](docs/architecture.md) for the full design.
+New here? Read [`docs/model.md`](docs/model.md) for the mental model (Session → Run → Task) in
+five minutes. See [`docs/architecture.md`](docs/architecture.md) for the full design.
 
 ---
 
