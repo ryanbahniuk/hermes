@@ -55,10 +55,15 @@ hermes --help
 
 Rebuild (`bun run build`) and re-copy after pulling changes.
 
-**Dev symlink.** `bun link` puts `hermes` in `~/.bun/bin` (which is on your `PATH`), but it's
-just a symlink back into this repo — it still needs the repo checked out and `bun` installed:
+**Dev symlink.** `bun link` puts `hermes` in `~/.bun/bin`, but it's just a symlink back into
+this repo — it still needs the repo checked out and `bun` installed. Make sure `~/.bun/bin` is
+on your `PATH` first (Bun's installer usually does this, but verify with `which hermes` after
+linking):
 
 ```bash
+# If ~/.bun/bin isn't on your PATH yet, add this to ~/.zshrc / ~/.bashrc:
+export PATH="$HOME/.bun/bin:$PATH"
+
 bun link                          # then: hermes <command>
 ```
 
