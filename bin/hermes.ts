@@ -19,6 +19,7 @@ import { spawnSupervisor, isAlive } from "../src/process/spawn";
 import { followLog, readLog, runLogFile, taskLogFile } from "../src/logging/logs";
 import { initHome } from "../src/init";
 import { runSingleTask } from "../src/orchestrator/single";
+import { supervise } from "../src/orchestrator/supervise";
 
 /** Wraps a command body so thrown errors print as one clean red line. */
 function action<C>(fn: (ctx: C) => unknown | Promise<unknown>) {
@@ -303,9 +304,20 @@ const project = defineCommand({
   subCommands: { list: projectList },
 });
 
+// Internal: the detached per-run supervisor entrypoint. `spawnSupervisor`
+// re-invokes this program as `hermes __supervise <runId>` so a single (possibly
+// compiled) binary serves both the CLI and the background supervisor.
+const superviseCmd = defineCommand({
+  meta: { name: "__supervise", description: "(internal) run a run's supervisor" },
+  args: { run: { type: "positional", required: true, description: "run id" } },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    await supervise(String(args.run));
+  }),
+});
+
 const main = defineCommand({
   meta: { name: "hermes", description: "Personal local development harness" },
-  subCommands: { init, run, agent, runs, ps, logs, stop, resume, show, watch, model, project },
+  subCommands: { init, run, agent, runs, ps, logs, stop, resume, show, watch, model, project, __supervise: superviseCmd },
 });
 
 runMain(main);

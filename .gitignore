@@ -7,3 +7,4 @@ node_modules/
 .context/
 dist/
 *.log
+*.bun-build

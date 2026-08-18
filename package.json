@@ -8,6 +8,7 @@
   },
   "scripts": {
     "hermes": "bun run ./bin/hermes.ts",
+    "build": "bun run ./scripts/build.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

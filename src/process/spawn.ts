@@ -1,11 +1,21 @@
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { ensureRunLogDir, runLogFile } from "../logging/logs";
 
-const SUPERVISOR_ENTRY = fileURLToPath(
-  new URL("../../bin/supervisor.ts", import.meta.url),
-);
+/**
+ * Re-invokes *this* program to run the detached supervisor, so it works whether
+ * we're a compiled standalone binary or running from source under `bun`.
+ *
+ * In a compiled binary `Bun.main` is a virtual `/$bunfs/…` path and `execPath`
+ * is the real executable, so we spawn the executable directly. Under `bun` from
+ * source, `execPath` is `bun` and we must pass the entry script as the first arg.
+ */
+function selfInvocation(): { cmd: string; args: string[] } {
+  const compiled = Bun.main.startsWith("/$bunfs/");
+  return compiled
+    ? { cmd: process.execPath, args: [] }
+    : { cmd: process.execPath, args: [Bun.main] };
+}
 
 /**
  * Spawns the supervisor for a run as a detached background process that outlives
@@ -15,7 +25,8 @@ const SUPERVISOR_ENTRY = fileURLToPath(
 export function spawnSupervisor(runId: string): number {
   ensureRunLogDir(runId);
   const fd = openSync(runLogFile(runId), "a");
-  const child = spawn("bun", [SUPERVISOR_ENTRY, runId], {
+  const { cmd, args } = selfInvocation();
+  const child = spawn(cmd, [...args, "__supervise", runId], {
     detached: true,
     stdio: ["ignore", fd, fd],
     env: process.env,

@@ -34,14 +34,30 @@ Run the CLI during development with:
 bun run hermes <command>          # e.g. bun run hermes init
 ```
 
-To get a global `hermes` binary, link it once:
+### A global `hermes` command
+
+Two ways to get `hermes` on your `PATH`:
+
+**Standalone binary (recommended).** Compile a single self-contained executable that embeds
+the Bun runtime — no `bun` or repo checkout needed at runtime:
+
+```bash
+bun run build                     # -> dist/hermes
+install -m 755 dist/hermes ~/.local/bin/hermes   # any dir on your PATH (e.g. /usr/local/bin)
+hermes --help
+```
+
+Rebuild (`bun run build`) and re-copy after pulling changes.
+
+**Dev symlink.** `bun link` puts `hermes` in `~/.bun/bin` (which is on your `PATH`), but it's
+just a symlink back into this repo — it still needs the repo checked out and `bun` installed:
 
 ```bash
 bun link                          # then: hermes <command>
 ```
 
 The examples below use `hermes <command>`; substitute `bun run hermes <command>` if you skip
-linking.
+both.
 
 ## Setup
 
