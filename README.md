@@ -96,10 +96,11 @@ both.
    > default chain can load your creds (env vars, or `AWS_PROFILE` pointing at a resolvable
    > profile).
 
-3. **Edit `~/.hermes/hermes.config.ts`** to register your projects and models (see below).
-   Inspect what's configured with:
+3. **Register your projects and models** in `~/.hermes/hermes.config.ts` (see below).
+   Add projects from the CLI, or edit the file directly for models:
 
    ```bash
+   hermes project add <name> <path> -d "<description>"
    hermes project list
    hermes model list
    ```
@@ -203,8 +204,14 @@ hermes run retry <run>      # respawn the supervisor to re-run incomplete tasks
 
 # Registries
 hermes project list
+hermes project add <name> <path> -d "<description>"   # register a project
+hermes project remove <name>                          # unregister a project
 hermes model list
 ```
+
+`project add`/`remove` edit `~/.hermes/hermes.config.ts` in place, rewriting only the
+`projects` array and leaving your models, comments, and formatting untouched. (Quote the
+path — `'~/code/api'` — if you want the literal `~` preserved rather than shell-expanded.)
 
 A delegated run returns immediately with a run id; a **detached supervisor process** does the
 work in the background (it survives your terminal closing). Worktrees are created under

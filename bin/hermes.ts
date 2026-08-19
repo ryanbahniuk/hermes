@@ -2,6 +2,8 @@
 import { defineCommand, runMain } from "citty";
 import pc from "picocolors";
 import { loadConfig } from "../src/config/load";
+import { addProjectToConfig, removeProjectFromConfig } from "../src/config/edit";
+import { CONFIG_PATH } from "../src/paths";
 import {
   db,
   listRuns,
@@ -298,6 +300,44 @@ const projectList = defineCommand({
   }),
 });
 
+const projectAdd = defineCommand({
+  meta: { name: "add", description: "Register a project in the config" },
+  args: {
+    name: { type: "positional", required: true, description: "Unique project name" },
+    path: { type: "positional", required: true, description: "Path to the local repo (git root; ~ ok)" },
+    description: {
+      type: "string",
+      alias: "d",
+      description: "What this repo is / does (guides the planner)",
+    },
+  },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    const description = args.description ? String(args.description) : "";
+    if (!description) {
+      throw new Error("A description is required. Pass one with --description/-d.");
+    }
+    const p = await addProjectToConfig({
+      name: String(args.name),
+      path: String(args.path),
+      description,
+    });
+    // Re-load so an invalid config (bad path, etc.) surfaces immediately.
+    await loadConfig();
+    console.log(pc.green(`Added project ${pc.bold(p.name)}`) + pc.dim(`  ${p.path}`));
+    console.log(pc.dim(`  ${CONFIG_PATH}`));
+  }),
+});
+
+const projectRemove = defineCommand({
+  meta: { name: "remove", description: "Remove a project from the config" },
+  args: { name: { type: "positional", required: true, description: "Project name" } },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    const p = await removeProjectFromConfig(String(args.name));
+    console.log(pc.green(`Removed project ${pc.bold(p.name)}`) + pc.dim(`  ${p.path}`));
+    console.log(pc.dim(`  ${CONFIG_PATH}`));
+  }),
+});
+
 const model = defineCommand({
   meta: { name: "model", description: "Model registry" },
   subCommands: { list: modelList },
@@ -305,7 +345,7 @@ const model = defineCommand({
 
 const project = defineCommand({
   meta: { name: "project", description: "Project registry" },
-  subCommands: { list: projectList },
+  subCommands: { list: projectList, add: projectAdd, remove: projectRemove },
 });
 
 // Internal: the detached per-run supervisor entrypoint. `spawnSupervisor`
