@@ -147,7 +147,7 @@ it never edits code. This keeps the powerful, expensive model on planning and ha
 work to a swarm of (possibly cheaper) workers.
 
 ```
-hermes chat   (foreground; `hermes` with no subcommand does the same)
+hermes session start   (foreground; `hermes` with no subcommand does the same)
    │  PlannerSession: one persisted `sessions` row + one long-lived PlannerRuntime instance
    │
    ├─ turn ↔ turn conversation with the user (transcript persisted to `session_messages`)
@@ -175,7 +175,7 @@ hermes chat   (foreground; `hermes` with no subcommand does the same)
   session is the sole way to kick off work. The planner may name projects + per-project subtasks
   explicitly (it has conversation context) or omit them and let the supervisor's own planner select.
 - **Persisted + resumable.** Sessions, their transcripts, resume handle, and rolled-up cost live
-  in SQLite. `hermes chat --resume <id>` reopens the conversation; `hermes sessions` lists them.
+  in SQLite. `hermes session start --resume <id>` reopens the conversation; `hermes session list` lists them.
 
 ## Execution model
 
@@ -211,7 +211,7 @@ delegate("problem")  ───────────────────�
 - Parallelism still holds: agent work is I/O-bound on Bedrock; `shell`/`git` are real OS
   subprocesses via `Bun.spawn`.
 - Resilience is explicit: orchestration progress is persisted in SQLite, and each agent's
-  conversation resumes via its runtime. `hermes resume <run>` replays.
+  conversation resumes via its runtime. `hermes run retry <run>` replays.
 - Still "background": the detached property holds at the *run* level.
 
 Worktrees provide **filesystem** isolation; we deliberately drop per-agent **process**
@@ -240,16 +240,17 @@ resident:
 
 | Command | Behavior |
 |---|---|
-| `hermes runs` / `hermes ps` | Read SQLite; pid-liveness-check the supervisor → show **running** vs **crashed/stalled**. |
-| `hermes logs <run> -f` | Tail the per-run log file. |
-| `hermes stop <run>` | Read `supervisor_pid`, send SIGTERM. |
-| `hermes resume <run>` | Respawn a supervisor; skip done tasks, resume in-flight ones from their runtime state. |
+| `hermes run list` / `hermes task list` | Read SQLite; pid-liveness-check the supervisor → show **running** vs **crashed/stalled**. |
+| `hermes run logs <run> -f` | Tail the per-run log file. |
+| `hermes run stop <run>` | Read `supervisor_pid`, send SIGTERM. |
+| `hermes run retry <run>` | Respawn a supervisor; skip done tasks, resume in-flight ones from their runtime state. |
+| `hermes session show <session>` | Print the session's Run → Task tree (top-down view). |
 
 **Terminal close vs. reboot:** detaching (new session + unref) means closing your terminal or
 shell does **not** kill a run; a machine reboot **does** (these are plain processes, not a
-launchd service). After a reboot, mid-flight runs sit in SQLite with a dead pid; `hermes runs`
-flags them stalled and `hermes resume` picks them up. Auto-resume-on-boot is a later opt-in
-(wrap resume in a launchd agent).
+launchd service). After a reboot, mid-flight runs sit in SQLite with a dead pid; `hermes run list`
+flags them stalled and `hermes retry` picks them up. Auto-resume-on-boot is a later opt-in
+(wrap retry in a launchd agent).
 
 ---
 
@@ -394,17 +395,22 @@ runs.session_id  text       -- nullable; links a delegated swarm back to its ses
 
 ## CLI surface (citty)
 
+# Grouped by the three model concepts — session / run / task — plus cross-cutting commands.
 ```
-hermes [chat] [--model <name>] [--resume <sessionId>]       # primary interface: planning session
-hermes sessions                                             # list planning sessions
+hermes [session start] [--model <name>] [--resume <sessionId>]  # primary interface: planning session
+hermes session list                                         # list planning sessions
+hermes session show <sessionId>                             # a session's run/task tree
                                                             # (work is kicked off only via a session's delegate)
 
-hermes runs [--status <s>]                                  # list runs
-hermes ps [<run>]                                           # list tasks/agents
-hermes show <run>                                           # detail: context, amendments, diffs
-hermes logs <run|task> [-f]                                 # tail per-run/per-task logs
-hermes stop <run>                                           # SIGTERM the supervisor
-hermes resume <run>                                         # respawn supervisor from state
+hermes run list [--status <s>]                              # list runs
+hermes run show <run>                                       # detail: context, amendments, diffs
+hermes run logs <run> [-f]                                  # tail the per-run log
+hermes run stop <run>                                       # SIGTERM the supervisor
+hermes run retry <run>                                      # respawn supervisor from state
+
+hermes task list [<run>]                                    # list tasks/agents
+hermes task logs <task> [-f]                                # tail the per-task log
+
 hermes watch                                                # Ink live dashboard
 
 hermes project add <path>                                   # read README + CLAUDE.md → draft description → write config
@@ -451,7 +457,7 @@ docs/architecture.md # this file
    tools + read allowlist. (Persistent checkpointer resume still uses in-memory `MemorySaver`.)
 3. ✅ **`ClaudeRuntime`** — wraps the Claude Agent SDK on Bedrock/Anthropic; tools/permissions/scoping
    via hooks; both runtimes satisfy the same contract.
-4. ✅ **Detached supervisor + lifecycle** — `run`/`ps`/`runs`/`logs`/`stop`/`resume`.
+4. ✅ **Detached supervisor + lifecycle** — `ps`/`runs`/`logs`/`stop`/`retry`.
 5. ✅ **Planner + fan-out** — multi-project selection, parallel implementers. Fan-out verified live
    on `claude`; planner needs a JS-SDK-resolvable AWS credential path (see operational note).
 6. ✅ **Shared context + reconcile** — contract authoring (planner) / default, distribution via the
@@ -474,6 +480,6 @@ the ~$0.22 preset overhead per `claude` task.
 
 - Coordinated *dependent* changes beyond a shared contract (e.g. staged rollout ordering).
 - Hard sandbox around `shell` if the read allowlist must be a true boundary.
-- Auto-resume-on-boot (launchd agent wrapping `hermes resume`).
+- Auto-resume-on-boot (launchd agent wrapping `hermes retry`).
 - Remote / multi-user execution.
 - `bun build --compile` single-binary distribution.

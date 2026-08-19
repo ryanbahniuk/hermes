@@ -102,7 +102,7 @@ export function createPlannerActions(
       return (
         `Dispatched run ${run.id} (${note}). ` +
         `Workers are running in the background; call check_runs to follow progress, ` +
-        `or the user can inspect with \`hermes logs ${run.id} -f\` and \`hermes show ${run.id}\`.`
+        `or the user can inspect with \`hermes run logs ${run.id} -f\` and \`hermes run show ${run.id}\`.`
       );
     },
 

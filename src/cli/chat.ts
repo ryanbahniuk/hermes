@@ -48,7 +48,7 @@ const HELP = [
   "  Commands:",
   "    /runs     list runs dispatched from this session",
   "    /help     show this help",
-  "    /exit     leave the session (it's saved; resume with `hermes chat --resume <id>`)",
+  "    /exit     leave the session (it's saved; resume with `hermes session start --resume <id>`)",
 ].join("\n");
 
 /**
@@ -127,5 +127,5 @@ export async function runChat(
   }
   rl.close();
 
-  stdout.write(pc.dim(`\nSession saved: ${session.id}. Resume with \`hermes chat --resume ${session.id}\`.\n`));
+  stdout.write(pc.dim(`\nSession saved: ${session.id}. Resume with \`hermes session start --resume ${session.id}\`.\n`));
 }
