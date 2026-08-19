@@ -312,7 +312,7 @@ const project = defineCommand({
 // re-invokes this program as `hermes __supervise <runId>` so a single (possibly
 // compiled) binary serves both the CLI and the background supervisor.
 const superviseCmd = defineCommand({
-  meta: { name: "__supervise", description: "(internal) run a run's supervisor" },
+  meta: { name: "__supervise", description: "(internal) run a run's supervisor", hidden: true },
   args: { run: { type: "positional", required: true, description: "run id" } },
   run: action(async ({ args }: { args: Record<string, unknown> }) => {
     await supervise(String(args.run));
