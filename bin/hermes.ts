@@ -12,6 +12,8 @@ import {
   listAmendments,
   setSupervisorPid,
   listSessions,
+  getSession,
+  listRunsBySession,
   sessionTotalCost,
 } from "../src/db";
 import { spawnSupervisor, isAlive } from "../src/process/spawn";
@@ -44,8 +46,8 @@ const init = defineCommand({
   }),
 });
 
-const chat = defineCommand({
-  meta: { name: "chat", description: "Interactive planning session with a planner agent (primary interface)" },
+const sessionStart = defineCommand({
+  meta: { name: "start", description: "Start (or --resume) an interactive planning session — the primary interface" },
   args: {
     model: { type: "string", description: "Planner model name (or name@version)" },
     resume: { type: "string", description: "Resume an existing session id" },
@@ -60,12 +62,12 @@ const chat = defineCommand({
   }),
 });
 
-const sessions = defineCommand({
-  meta: { name: "sessions", description: "List planning sessions" },
+const sessionList = defineCommand({
+  meta: { name: "list", description: "List planning sessions" },
   run: action(() => {
     db();
     const rows = listSessions();
-    if (rows.length === 0) return void console.log(pc.dim("No sessions yet. Start one with `hermes chat`."));
+    if (rows.length === 0) return void console.log(pc.dim("No sessions yet. Start one with `hermes session start`."));
     for (const s of rows) {
       const live = s.status === "active" ? pc.green("active") : pc.dim("closed");
       const cost = sessionTotalCost(s.id);
@@ -78,8 +80,8 @@ const sessions = defineCommand({
   }),
 });
 
-const runs = defineCommand({
-  meta: { name: "runs", description: "List runs" },
+const runList = defineCommand({
+  meta: { name: "list", description: "List runs" },
   run: action(() => {
     db();
     const rows = listRuns();
@@ -98,8 +100,8 @@ const runs = defineCommand({
   }),
 });
 
-const ps = defineCommand({
-  meta: { name: "ps", description: "List tasks/agents" },
+const taskList = defineCommand({
+  meta: { name: "list", description: "List tasks/agents" },
   args: { run: { type: "positional", required: false, description: "Filter by run id" } },
   run: action(({ args }: { args: Record<string, unknown> }) => {
     db();
@@ -113,30 +115,39 @@ const ps = defineCommand({
   }),
 });
 
-const logs = defineCommand({
-  meta: { name: "logs", description: "Show run/task logs" },
+const runLogs = defineCommand({
+  meta: { name: "logs", description: "Tail a run's log" },
   args: {
-    target: { type: "positional", required: true, description: "run id or task id" },
+    run: { type: "positional", required: true, description: "run id" },
     follow: { type: "boolean", alias: "f", default: false, description: "Follow output" },
   },
   run: action(({ args }: { args: Record<string, unknown> }) => {
     db();
-    const target = String(args.target);
-    let file: string;
-    if (target.startsWith("task_")) {
-      const t = getTask(target);
-      if (!t) throw new Error(`No such task: ${target}`);
-      file = taskLogFile(t.run_id, t.id);
-    } else {
-      if (!getRun(target)) throw new Error(`No such run: ${target}`);
-      file = runLogFile(target);
-    }
+    const runId = String(args.run);
+    if (!getRun(runId)) throw new Error(`No such run: ${runId}`);
+    const file = runLogFile(runId);
     if (args.follow) return followLog(file);
     process.stdout.write(readLog(file));
   }),
 });
 
-const stop = defineCommand({
+const taskLogs = defineCommand({
+  meta: { name: "logs", description: "Tail a task's log" },
+  args: {
+    task: { type: "positional", required: true, description: "task id" },
+    follow: { type: "boolean", alias: "f", default: false, description: "Follow output" },
+  },
+  run: action(({ args }: { args: Record<string, unknown> }) => {
+    db();
+    const t = getTask(String(args.task));
+    if (!t) throw new Error(`No such task: ${args.task}`);
+    const file = taskLogFile(t.run_id, t.id);
+    if (args.follow) return followLog(file);
+    process.stdout.write(readLog(file));
+  }),
+});
+
+const runStop = defineCommand({
   meta: { name: "stop", description: "Stop a run's supervisor" },
   args: { run: { type: "positional", required: true, description: "run id" } },
   run: action(({ args }: { args: Record<string, unknown> }) => {
@@ -149,37 +160,88 @@ const stop = defineCommand({
   }),
 });
 
-const show = defineCommand({
-  meta: { name: "show", description: "Show run detail: contract, tasks, amendments" },
+/** Prints full detail for one run: header, contract, tasks, amendments. */
+function showRun(runId: string): void {
+  const r = getRun(runId);
+  if (!r) throw new Error(`No such run: ${runId}`);
+
+  console.log(`${pc.bold(r.id)}  ${pc.cyan(r.status)}  ${pc.dim(`$${r.cost.toFixed(4)}`)}`);
+  console.log(pc.dim(`planner: ${r.planner_model ?? "-"}   created: ${r.created_at}`));
+  console.log(`${pc.bold("problem:")} ${r.problem}`);
+
+  const sc = getSharedContext(r.id);
+  console.log(pc.bold(`\nshared context: `) + (sc ? pc.dim(`v${sc.version} (by ${sc.authored_by})`) : pc.dim("(none)")));
+  if (sc) console.log(sc.content);
+
+  const tasks = listTasks(r.id);
+  console.log(pc.bold(`\ntasks (${tasks.length}):`));
+  for (const t of tasks) {
+    console.log(
+      `  ${pc.bold(t.project_name)}  ${pc.cyan(t.status)}  ${t.runtime ?? "-"}  ${pc.dim(`$${t.cost.toFixed(4)}`)}  ${pc.dim(t.id)}`,
+    );
+  }
+
+  const amendments = listAmendments(r.id);
+  console.log(pc.bold(`\namendments (${amendments.length}):`));
+  for (const a of amendments) {
+    const color = a.status === "accepted" ? pc.green : a.status === "rejected" ? pc.yellow : pc.dim;
+    console.log(`  ${color(`[${a.status}]`)} ${a.proposal}`);
+    if (a.resolution) console.log(pc.dim(`      → ${a.resolution}`));
+  }
+}
+
+/** Prints a session's Session -> Run -> Task tree — the top-down view. */
+function showSession(sessionId: string): void {
+  const s = getSession(sessionId);
+  if (!s) throw new Error(`No such session: ${sessionId}`);
+
+  const live = s.status === "active" ? pc.green("active") : pc.dim("closed");
+  const cost = sessionTotalCost(s.id);
+  console.log(`${pc.bold(s.id)}  ${live}  ${pc.dim(`$${cost.total.toFixed(4)}`)}` +
+    pc.dim(` (plan $${cost.planner.toFixed(4)} + work $${cost.work.toFixed(4)})`));
+  console.log(pc.dim(`planner: ${s.planner_model ?? "-"}   created: ${s.created_at}`));
+  console.log(`${pc.bold("title:")} ${s.title ?? pc.dim("(untitled)")}`);
+
+  const runs = listRunsBySession(s.id);
+  console.log(pc.bold(`\nruns (${runs.length}):`));
+  if (runs.length === 0) {
+    console.log(pc.dim("  (none dispatched yet)"));
+    return;
+  }
+  for (const r of runs) {
+    const terminal = r.status === "done" || r.status === "failed";
+    const rlive = terminal
+      ? pc.dim(r.status)
+      : isAlive(r.supervisor_pid)
+        ? pc.green("running")
+        : pc.yellow("stalled");
+    console.log(
+      `  ${pc.bold(r.id)}  ${rlive}  ${pc.dim(`$${r.cost.toFixed(4)}`)}  ${pc.dim(r.problem.slice(0, 60))}`,
+    );
+    for (const t of listTasks(r.id)) {
+      console.log(
+        `    ${pc.bold(t.project_name)}  ${pc.cyan(t.status)}  ${t.runtime ?? "-"}  ${pc.dim(`$${t.cost.toFixed(4)}`)}  ${pc.dim(t.id)}`,
+      );
+    }
+  }
+  console.log(pc.dim(`\n  inspect a run: hermes run show <run>`));
+}
+
+const runShow = defineCommand({
+  meta: { name: "show", description: "Show a run's detail: contract, tasks, amendments" },
   args: { run: { type: "positional", required: true, description: "run id" } },
   run: action(({ args }: { args: Record<string, unknown> }) => {
     db();
-    const r = getRun(String(args.run));
-    if (!r) throw new Error(`No such run: ${args.run}`);
+    showRun(String(args.run));
+  }),
+});
 
-    console.log(`${pc.bold(r.id)}  ${pc.cyan(r.status)}  ${pc.dim(`$${r.cost.toFixed(4)}`)}`);
-    console.log(pc.dim(`planner: ${r.planner_model ?? "-"}   created: ${r.created_at}`));
-    console.log(`${pc.bold("problem:")} ${r.problem}`);
-
-    const sc = getSharedContext(r.id);
-    console.log(pc.bold(`\nshared context: `) + (sc ? pc.dim(`v${sc.version} (by ${sc.authored_by})`) : pc.dim("(none)")));
-    if (sc) console.log(sc.content);
-
-    const tasks = listTasks(r.id);
-    console.log(pc.bold(`\ntasks (${tasks.length}):`));
-    for (const t of tasks) {
-      console.log(
-        `  ${pc.bold(t.project_name)}  ${pc.cyan(t.status)}  ${t.runtime ?? "-"}  ${pc.dim(`$${t.cost.toFixed(4)}`)}  ${pc.dim(t.id)}`,
-      );
-    }
-
-    const amendments = listAmendments(r.id);
-    console.log(pc.bold(`\namendments (${amendments.length}):`));
-    for (const a of amendments) {
-      const color = a.status === "accepted" ? pc.green : a.status === "rejected" ? pc.yellow : pc.dim;
-      console.log(`  ${color(`[${a.status}]`)} ${a.proposal}`);
-      if (a.resolution) console.log(pc.dim(`      → ${a.resolution}`));
-    }
+const sessionShow = defineCommand({
+  meta: { name: "show", description: "Show a session's run/task tree (top-down view)" },
+  args: { session: { type: "positional", required: true, description: "session id" } },
+  run: action(({ args }: { args: Record<string, unknown> }) => {
+    db();
+    showSession(String(args.session));
   }),
 });
 
@@ -191,8 +253,8 @@ const watch = defineCommand({
   }),
 });
 
-const resume = defineCommand({
-  meta: { name: "resume", description: "Resume a run: re-run its incomplete tasks" },
+const runRetry = defineCommand({
+  meta: { name: "retry", description: "Retry a run: respawn its supervisor to re-run incomplete tasks" },
   args: { run: { type: "positional", required: true, description: "run id" } },
   run: action(({ args }: { args: Record<string, unknown> }) => {
     db();
@@ -204,8 +266,8 @@ const resume = defineCommand({
     if (r.status === "done") return void console.log(pc.yellow("Run is already done."));
     const pid = spawnSupervisor(r.id);
     setSupervisorPid(r.id, pid);
-    console.log(pc.green(`Resumed ${pc.bold(r.id)}`) + pc.dim(`  (supervisor pid ${pid})`));
-    console.log(pc.dim(`  hermes logs ${r.id} -f`));
+    console.log(pc.green(`Retrying ${pc.bold(r.id)}`) + pc.dim(`  (supervisor pid ${pid})`));
+    console.log(pc.dim(`  hermes run logs ${r.id} -f`));
   }),
 });
 
@@ -257,16 +319,29 @@ const superviseCmd = defineCommand({
   }),
 });
 
+// The three model concepts are the top-level nouns; each groups the verbs that
+// act on it. `init`/`watch` are cross-cutting, and `model`/`project` are the
+// config registries.
+const session = defineCommand({
+  meta: { name: "session", description: "Planning sessions — the primary interface" },
+  subCommands: { start: sessionStart, list: sessionList, show: sessionShow },
+});
+
+const run = defineCommand({
+  meta: { name: "run", description: "Runs — a batch of coordinated work fanned out across projects" },
+  subCommands: { list: runList, show: runShow, logs: runLogs, stop: runStop, retry: runRetry },
+});
+
+const task = defineCommand({
+  meta: { name: "task", description: "Tasks — one project's slice of a run" },
+  subCommands: { list: taskList, logs: taskLogs },
+});
+
 const subCommands = {
-  chat,
-  sessions,
+  session,
+  run,
+  task,
   init,
-  runs,
-  ps,
-  logs,
-  stop,
-  resume,
-  show,
   watch,
   model,
   project,
@@ -278,15 +353,15 @@ const main = defineCommand({
   subCommands,
 });
 
-// The primary interface is the planning chat: a bare `hermes` (or one with only
-// leading flags, e.g. `hermes --resume <id>`) opens a session. We inject the
-// `chat` subcommand rather than using citty's parent `run`, because citty always
+// The primary interface is the planning session: a bare `hermes` (or one with
+// only leading flags, e.g. `hermes --resume <id>`) starts one. We inject
+// `session start` rather than using citty's parent `run`, because citty always
 // runs a command's `run` *in addition to* any matched subcommand.
 const rawArgs = process.argv.slice(2);
 const wantsMeta = rawArgs.some((a) => a === "--help" || a === "-h" || a === "--version");
 const noSubCommand = rawArgs.length === 0 || (rawArgs[0]?.startsWith("-") ?? false);
 if (!wantsMeta && noSubCommand) {
-  process.argv.splice(2, 0, "chat");
+  process.argv.splice(2, 0, "session", "start");
 }
 
 runMain(main);

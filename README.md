@@ -7,7 +7,7 @@ itself; it plans, investigates read-only, and dispatches. Workers run in isolate
 across your locally checked-out projects, coordinated through a shared contract so cross-repo
 changes stay consistent.
 
-- **Interactive planner** as the front door (`hermes chat`, or just `hermes`) — an ongoing,
+- **Interactive planner** as the front door (`hermes session start`, or just `hermes`) — an ongoing,
   resumable conversation, not a fire-and-forget command.
 - **Model-agnostic** over Bedrock (Claude, Llama, Mistral, Nova, …) for both the planner and the
   workers; Anthropic models can also run via the first-party API.
@@ -159,11 +159,12 @@ Key fields:
 ### The primary interface: a planning session
 
 ```bash
-hermes                      # open a planning session (bare command == `hermes chat`)
-hermes chat                 # same thing, explicit
-hermes chat --model claude-sonnet
-hermes chat --resume <sessionId>   # or: hermes --resume <sessionId>
-hermes sessions             # list your planning sessions
+hermes                             # open a planning session (bare == `hermes session start`)
+hermes session start               # same thing, explicit
+hermes session start --model claude-sonnet
+hermes session start --resume <sessionId>   # or: hermes --resume <sessionId>
+hermes session list                # list your planning sessions
+hermes session show <sessionId>    # its run/task tree (top-down view)
 ```
 
 You then just talk to the planner. It asks clarifying questions, reads your projects
@@ -178,17 +179,22 @@ lifecycle control over runs a session has already dispatched.
 
 ### Inspecting and controlling dispatched runs
 
+The CLI is organized by the three model concepts — **`session`**, **`run`**, **`task`** — each
+grouping the verbs that act on it (plus the top-level `watch`, `init`, `model`, `project`).
+
 ```bash
 # Inspect
-hermes runs                 # list runs (running / stalled / done / failed + cost)
-hermes ps [<run>]           # list tasks/agents
-hermes show <run>           # contract, tasks, amendments
-hermes logs <run|task> [-f] # tail logs (-f to follow)
+hermes run list             # list runs (running / stalled / done / failed + cost)
+hermes task list [<run>]    # list tasks/agents (optionally filtered to one run)
+hermes run show <run>       # a run's contract, tasks, amendments
+hermes session show <sess>  # a session's run/task tree (top-down view)
+hermes run logs <run> [-f]  # tail a run's log (-f to follow)
+hermes task logs <task> [-f]# tail a task's log
 hermes watch                # live Ink dashboard (press q to quit)
 
 # Control
-hermes stop <run>           # SIGTERM the run's supervisor
-hermes resume <run>         # re-run a run's incomplete tasks
+hermes run stop <run>       # SIGTERM the run's supervisor
+hermes run retry <run>      # respawn the supervisor to re-run incomplete tasks
 
 # Registries
 hermes project list
@@ -202,7 +208,7 @@ work in the background (it survives your terminal closing). Worktrees are create
 ## How it works (in brief)
 
 ```
-hermes chat  →  interactive planning session (foreground, one planner agent)
+hermes session start  →  interactive planning session (foreground, one planner agent)
    ├─ clarifies requirements with you (multi-turn conversation, persisted + resumable)
    ├─ investigates your projects read-only (it cannot edit code)
    └─ delegate(problem[, projects, sharedContext])  ─┐  (a tool the planner calls)

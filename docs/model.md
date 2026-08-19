@@ -24,8 +24,8 @@ which repos a piece of work touches. Projects are the fixed universe Hermes oper
 everything else below is created at runtime.
 
 ### Session — the conversation
-An ongoing, **resumable chat with a planner agent**. This is the front door (`hermes chat`, or
-just `hermes`). The planner's job is to **clarify and delegate — it never edits code**. It can
+An ongoing, **resumable chat with a planner agent**. This is the front door (`hermes session
+start`, or just `hermes`). The planner's job is to **clarify and delegate — it never edits code**. It can
 read your projects (read-only) to ask good questions, and it dispatches work by calling its
 `delegate` tool. A session is a foreground process while you're in it; its transcript, resume
 handle, and cost persist so you can leave and `--resume` later.
@@ -34,9 +34,9 @@ Think of a session as *a line of thinking about some goal*, not a single command
 
 ### Run — a batch of work
 One **problem statement fanned out across the relevant projects**, coordinated by one shared
-contract and reconciled together. A run is what `hermes run "…"` creates directly, and it's also
-exactly what the planner's `delegate` produces. Each run is owned by a **detached background
-supervisor** that survives your terminal closing.
+contract and reconciled together. A run is exactly what the planner's `delegate` produces (there
+is no direct "start a run" command — work is only kicked off from within a session). Each run is
+owned by a **detached background supervisor** that survives your terminal closing.
 
 A run has a lifecycle: `plan → implement (parallel) → adjudicate → reconcile → done`. Because a
 run is fanned out *once* and reconciled *once*, "do X, then based on the result do Y" is **two
@@ -98,7 +98,7 @@ Session: *"add idempotency keys to our payments API"* (projects: `schemas`, `api
      └─ Task api     → enforce + dedupe on the key
      contract: "header Idempotency-Key; 24h retention; 409 on replay"
    ```
-3. You review Run A's diffs (`hermes show <run>`), merge it.
+3. You review Run A's diffs (`hermes run show <run>`), merge it.
 4. **Same session**, next turn: "now make the clients send the key" → **Run B**:
    ```
    Run B  "send Idempotency-Key from the clients"
@@ -139,11 +139,13 @@ Cost is produced at the leaves (tasks) and aggregates upward:
 
 ## Quick command map
 
+The CLI is grouped by the three concepts — `session`, `run`, `task` — each with its own verbs.
+
 | You want to… | Command |
 |---|---|
-| Start / resume the primary interface | `hermes` · `hermes chat` · `hermes chat --resume <id>` |
-| See your conversations | `hermes sessions` |
-| Dispatch a batch directly (skip the chat) | `hermes run "…" [--projects a,b]` |
-| Inspect a batch | `hermes runs` · `hermes ps <run>` · `hermes show <run>` |
-| Watch work happen | `hermes logs <run> -f` · `hermes watch` |
-| Control a batch | `hermes stop <run>` · `hermes resume <run>` |
+| Start / resume the primary interface | `hermes` · `hermes session start` · `hermes session start --resume <id>` |
+| See your conversations | `hermes session list` |
+| Inspect a whole conversation | `hermes session show <session>` (its run/task tree) |
+| Inspect a batch | `hermes run list` · `hermes task list <run>` · `hermes run show <run>` |
+| Watch work happen | `hermes run logs <run> -f` · `hermes watch` |
+| Control a batch | `hermes run stop <run>` · `hermes run retry <run>` |
