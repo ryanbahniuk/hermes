@@ -93,6 +93,9 @@ export const ConfigSchema = z.object({
     .object({
       plannerModel: z.string().optional(),
       implementerModel: z.string().optional(),
+      // A cheap/fast model used for lightweight chores like auto-generating a
+      // project description from its README.md / CLAUDE.md.
+      summaryModel: z.string().optional(),
     })
     .default({}),
 });
@@ -105,5 +108,5 @@ export interface HermesConfig {
   projects: Project[];
   models: Model[];
   readAllowlist: string[];
-  defaults: { plannerModel?: string; implementerModel?: string };
+  defaults: { plannerModel?: string; implementerModel?: string; summaryModel?: string };
 }

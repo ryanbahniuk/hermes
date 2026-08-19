@@ -3,6 +3,7 @@ import { defineCommand, runMain } from "citty";
 import pc from "picocolors";
 import { loadConfig } from "../src/config/load";
 import { addProjectToConfig, removeProjectFromConfig } from "../src/config/edit";
+import { generateProjectDescription } from "../src/projects/describe";
 import { CONFIG_PATH } from "../src/paths";
 import {
   db,
@@ -308,17 +309,22 @@ const projectAdd = defineCommand({
     description: {
       type: "string",
       alias: "d",
-      description: "What this repo is / does (guides the planner)",
+      description: "What this repo is / does (guides the planner). Auto-generated from README.md/CLAUDE.md if omitted.",
     },
   },
   run: action(async ({ args }: { args: Record<string, unknown> }) => {
-    const description = args.description ? String(args.description) : "";
+    const path = String(args.path);
+    let description = args.description ? String(args.description) : "";
     if (!description) {
-      throw new Error("A description is required. Pass one with --description/-d.");
+      // Fall back to summarizing the repo's docs with the cheap summary model.
+      const config = await loadConfig();
+      console.log(pc.dim("No --description given; summarizing README.md / CLAUDE.md…"));
+      description = await generateProjectDescription(config, path);
+      console.log(pc.dim(`  ${description}`));
     }
     const p = await addProjectToConfig({
       name: String(args.name),
-      path: String(args.path),
+      path,
       description,
     });
     // Re-load so an invalid config (bad path, etc.) surfaces immediately.

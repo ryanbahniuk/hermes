@@ -1,14 +1,6 @@
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { CONFIG_PATH } from "../paths";
+import { CONFIG_PATH, expandHome } from "../paths";
 import { ConfigSchema, normalizeModel, type HermesConfig } from "./schema";
-
-function expandHome(p: string): string {
-  if (p === "~") return homedir();
-  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
-  return p;
-}
 
 /**
  * Loads and validates the user's config. The config file is a `.ts` module that

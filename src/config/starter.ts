@@ -48,6 +48,11 @@ export default {
   defaults: {
     plannerModel: "claude-sonnet",
     // implementerModel: "claude-sonnet",
+
+    // Cheap/fast model for lightweight chores — e.g. \`hermes project add\`
+    // auto-generates a description from the repo's README.md / CLAUDE.md when
+    // you omit --description. Point this at a small model to keep it cheap.
+    // summaryModel: "claude-haiku",
   },
 };
 `;
