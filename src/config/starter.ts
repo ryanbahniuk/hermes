@@ -12,12 +12,15 @@ export default {
   // Models available to the planner and implementers.
   //   runtime  defaults: provider "anthropic" -> "claude", otherwise -> "hermes".
   //   backend  defaults to "bedrock".
+  // Tip: \`hermes model add <name> <version> --model-id <id>\` appends entries here
+  // and resolves the inference profile for you — \`hermes model discover\` lists ids.
   models: [
     {
       name: "claude-sonnet",
       version: "4.5",
       provider: "anthropic",
-      // Replace with a real Bedrock inference-profile id for your account:
+      // Replace with a real Bedrock inference-profile id for your account (or run
+      // \`hermes model remove claude-sonnet 4.5\` then \`hermes model add\` to resolve it):
       inferenceProfile: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
     },
 
@@ -45,6 +48,8 @@ export default {
   // Extra directories the read tool may read (read-only), beyond each worktree.
   readAllowlist: [],
 
+  // Fallback models per role (set via \`hermes model set-default <role> <model>\`).
+  // Used when nothing higher-priority applies.
   defaults: {
     plannerModel: "claude-sonnet",
     // implementerModel: "claude-sonnet",
@@ -53,6 +58,13 @@ export default {
     // auto-generates a description from the repo's README.md / CLAUDE.md when
     // you omit --description. Point this at a small model to keep it cheap.
     // summaryModel: "claude-haiku",
+  },
+
+  // Hard pins per role (set via \`hermes model set <role> <model>\`). These win
+  // over intelligent routing — use them to force a specific model regardless of
+  // what the router would pick. Precedence: overrides > routing > defaults.
+  overrides: {
+    // plannerModel: "claude-sonnet",
   },
 };
 `;

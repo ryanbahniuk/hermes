@@ -85,19 +85,30 @@ export function normalizeModel(m: ModelInput): Model {
   };
 }
 
+/**
+ * Per-role model selections. `defaults` is the fallback; `overrides` is a hard
+ * pin that wins over (future) intelligent routing. Same shape for both.
+ *   plannerModel     — the planning/adjudication model.
+ *   implementerModel — the worker model (falls back to the planner).
+ *   summaryModel     — a cheap/fast model for chores like auto-generating a
+ *                      project description from its README.md / CLAUDE.md.
+ */
+export const ModelRolesSchema = z
+  .object({
+    plannerModel: z.string().optional(),
+    implementerModel: z.string().optional(),
+    summaryModel: z.string().optional(),
+  })
+  .default({});
+export type ModelRoles = z.infer<typeof ModelRolesSchema>;
+
 export const ConfigSchema = z.object({
   projects: z.array(ProjectSchema).default([]),
   models: z.array(ModelInputSchema).default([]),
   readAllowlist: z.array(z.string()).default([]),
-  defaults: z
-    .object({
-      plannerModel: z.string().optional(),
-      implementerModel: z.string().optional(),
-      // A cheap/fast model used for lightweight chores like auto-generating a
-      // project description from its README.md / CLAUDE.md.
-      summaryModel: z.string().optional(),
-    })
-    .default({}),
+  defaults: ModelRolesSchema,
+  // Hard pins that take precedence over intelligent routing (and defaults).
+  overrides: ModelRolesSchema,
 });
 
 /** Shape accepted from a user's config file (before normalization). */
@@ -108,5 +119,6 @@ export interface HermesConfig {
   projects: Project[];
   models: Model[];
   readAllowlist: string[];
-  defaults: { plannerModel?: string; implementerModel?: string; summaryModel?: string };
+  defaults: ModelRoles;
+  overrides: ModelRoles;
 }

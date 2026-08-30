@@ -149,3 +149,6 @@ The CLI is grouped by the three concepts — `session`, `run`, `task` — each w
 | Inspect a batch | `hermes run list` · `hermes task list <run>` · `hermes run show <run>` |
 | Watch work happen | `hermes run logs <run> -f` · `hermes watch` |
 | Control a batch | `hermes run stop <run>` · `hermes run retry <run>` |
+| Manage projects | `hermes project list` · `hermes project add <name> <path>` · `hermes project remove <name>` |
+| Manage models | `hermes model list` · `hermes model discover` · `hermes model add <name> <version> --model-id <id>` · `hermes model remove <name> [version]` |
+| Choose role models | `hermes model set-default <role> <name>` (fallback) · `hermes model set <role> <name>` (hard pin, wins over routing) · `… <role> --clear` |

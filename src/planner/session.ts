@@ -1,5 +1,6 @@
 import type { HermesConfig } from "../config/schema";
 import { resolveModel, type ResolvedModel } from "../models/registry";
+import { effectiveModelRef } from "../models/routing";
 import { costFromPricing, type TokenTotals } from "../orchestrator/execute";
 import {
   addSessionCost,
@@ -56,7 +57,7 @@ export class PlannerSession {
 
   /** Starts a fresh session with the given (or default) planner model. */
   static start(config: HermesConfig, modelRef?: string): PlannerSession {
-    const ref = modelRef ?? config.defaults.plannerModel;
+    const ref = modelRef ?? effectiveModelRef(config, "planner");
     if (!ref) throw new Error("No model given and no defaults.plannerModel configured.");
     const model = resolveModel(config, ref);
 

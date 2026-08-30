@@ -22,5 +22,6 @@ export async function loadConfig(path = CONFIG_PATH): Promise<HermesConfig> {
     models: parsed.models.map(normalizeModel),
     readAllowlist: parsed.readAllowlist.map(expandHome),
     defaults: parsed.defaults,
+    overrides: parsed.overrides,
   };
 }

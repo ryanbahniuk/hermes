@@ -1,5 +1,6 @@
 import { loadConfig } from "../config/load";
 import { resolveModel, type ResolvedModel } from "../models/registry";
+import { effectiveModelRef } from "../models/routing";
 import {
   db,
   createTask,
@@ -49,7 +50,7 @@ export async function supervise(runId: string): Promise<void> {
     // --- Plan phase: only if no tasks were pre-selected (`run --projects`). ---
     if (listTasks(runId).length === 0) {
       setRunStatus(runId, "planning");
-      const plannerRef = run.planner_model ?? config.defaults.plannerModel;
+      const plannerRef = run.planner_model ?? effectiveModelRef(config, "planner");
       if (!plannerRef) throw new Error(`no planner model configured`);
       const plannerModel = resolveModel(config, plannerRef);
 
@@ -61,7 +62,7 @@ export async function supervise(runId: string): Promise<void> {
         appendLog(runLog, `planner authored shared context v${version}`);
       }
 
-      const implRef = config.defaults.implementerModel ?? plannerRef;
+      const implRef = effectiveModelRef(config, "implementer") ?? plannerRef;
       const implModel = resolveModel(config, implRef);
       const implLabel = `${implModel.name}@${implModel.version}`;
 
@@ -93,7 +94,7 @@ export async function supervise(runId: string): Promise<void> {
 
   // Adjudicator for live amendment proposals: the powerful (planner) model.
   let adjudicator: ResolvedModel | undefined;
-  const adjRef = config.defaults.plannerModel ?? run.planner_model;
+  const adjRef = effectiveModelRef(config, "planner") ?? run.planner_model;
   if (adjRef) {
     try {
       adjudicator = resolveModel(config, adjRef);

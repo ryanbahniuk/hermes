@@ -96,24 +96,34 @@ both.
    > default chain can load your creds (env vars, or `AWS_PROFILE` pointing at a resolvable
    > profile).
 
-3. **Register your projects and models** in `~/.hermes/hermes.config.ts` (see below).
-   Add projects from the CLI, or edit the file directly for models:
+3. **Register your projects and models** in `~/.hermes/hermes.config.ts`. Both
+   registries have CLI commands, so you never have to hand-edit the file:
 
    ```bash
    hermes project add <name> <path> -d "<description>"
    hermes project list
-   hermes model list
    hermes model discover   # find the Bedrock models your AWS identity can invoke
+   hermes model add <name> <version> --model-id <id>   # add one (profile auto-resolved)
+   hermes model list
    ```
 
    `hermes model discover` inspects your Bedrock account (foundation models +
    inference profiles) **and** the Mantle gateway catalog, merging both into one
-   list of the chat models you can reach — native entries carry the
-   `inferenceProfile` value to paste into a `models[]` entry. `READY` means a
-   usable application-inference-profile ARN exists; `DISCOVERED_NOT_VALIDATED`
-   marks Mantle gateway entries (visible but not confirmed invokable). Use
+   list of the chat models you can reach. `READY` means a usable
+   application-inference-profile ARN exists; `DISCOVERED_NOT_VALIDATED` marks
+   Mantle gateway entries (visible but not confirmed invokable). Use
    `--ready-only` to hide the rest, `--profile`/`--region` to target a specific
    identity, and `--json` for scripting.
+
+   `hermes model add` then registers one **without you ever touching an inference
+   profile**: give it a friendly `<name> <version>` plus the Bedrock `--model-id`
+   from discover (or let it match by `--provider` + name/version), and it resolves
+   the READY application-inference-profile ARN for you and writes the entry.
+   Escape hatches: `--inference-profile <arn>` (set the target directly, skip
+   discovery) and `--api-model-id <id>` (first-party Anthropic API backend
+   instead of Bedrock). Add `--input-price`/`--output-price` (USD per 1M tokens)
+   for non-Anthropic models so cost can be computed. Remove one with
+   `hermes model remove <name> [version]`.
 
    Add `--verify` to actually invoke each model with a minimal prompt and confirm
    which ones work for *your* profile — native models via the Bedrock Converse API,
@@ -122,6 +132,19 @@ both.
    e.g. a `READY` application profile whose role still lacks `bedrock:InvokeModel`.
    These are real, billable inference calls (one per model), so it's opt-in —
    scope it with `--ready-only` to keep it cheap.
+
+   Pick which registered models each role uses (roles: `planner`, `implementer`,
+   `summary`). Two levels, checked in this order:
+
+   - `hermes model set <role> <name[@version]>` → `overrides` — a **hard pin**
+     that wins over intelligent routing. Use it to force a specific model.
+   - `hermes model set-default <role> <name[@version]>` → `defaults` — the
+     **fallback** the router falls back to when it has no strong pick.
+
+   Full precedence per role: an explicit `--model` flag → override → intelligent
+   routing (planned) → default. The planner and summary roles must be
+   bedrock-backed; the implementer may be any registered model. `--clear` unsets
+   a role in either section, and `hermes model list` prints both.
 
 ## Configuration
 
@@ -161,9 +184,13 @@ export default {
   // Extra directories the read tool may read (read-only), beyond each worktree.
   readAllowlist: [],
 
-  defaults: {
+  defaults: {                            // fallback per role (routing falls back here)
     plannerModel: "claude-sonnet",       // powerful model: planning + adjudication
     // implementerModel: "claude-sonnet", // defaults to plannerModel if omitted
+  },
+
+  overrides: {                           // hard pins — win over intelligent routing
+    // plannerModel: "claude-sonnet",
   },
 };
 ```
@@ -227,11 +254,18 @@ hermes project remove <name>                          # unregister a project
 hermes model list
 hermes model discover       # discover invokable Bedrock + Mantle models and their targets
 hermes model discover --verify  # …and probe each to confirm it works for your profile
+hermes model add <name> <version> --model-id <id>   # register one (inference profile auto-resolved)
+hermes model remove <name> [version]                # unregister a model
+hermes model set-default planner <name[@version]>     # fallback planner model
+hermes model set-default implementer <name[@version]> # fallback implementer model
+hermes model set implementer <name[@version]>         # hard pin (overrides routing)
+hermes model set <role> --clear                       # remove an override
 ```
 
-`project add`/`remove` edit `~/.hermes/hermes.config.ts` in place, rewriting only the
-`projects` array and leaving your models, comments, and formatting untouched. (Quote the
-path — `'~/code/api'` — if you want the literal `~` preserved rather than shell-expanded.)
+`project add`/`remove` and `model add`/`remove` edit `~/.hermes/hermes.config.ts` in place,
+rewriting only the relevant array and leaving everything else — your other entries, comments,
+and formatting — untouched. (Quote a project path — `'~/code/api'` — if you want the literal
+`~` preserved rather than shell-expanded.)
 
 A delegated run returns immediately with a run id; a **detached supervisor process** does the
 work in the background (it survives your terminal closing). Worktrees are created under

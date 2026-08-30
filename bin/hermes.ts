@@ -2,7 +2,18 @@
 import { defineCommand, runMain } from "citty";
 import pc from "picocolors";
 import { loadConfig } from "../src/config/load";
-import { addProjectToConfig, removeProjectFromConfig } from "../src/config/edit";
+import {
+  addProjectToConfig,
+  removeProjectFromConfig,
+  addModelToConfig,
+  removeModelFromConfig,
+  setSectionModel,
+  clearSectionModel,
+  type ModelRoleKey,
+  type ModelSection,
+} from "../src/config/edit";
+import type { ModelInput, Pricing } from "../src/config/schema";
+import { resolveModel } from "../src/models/registry";
 import { generateProjectDescription } from "../src/projects/describe";
 import { CONFIG_PATH } from "../src/paths";
 import {
@@ -286,6 +297,239 @@ const modelList = defineCommand({
           `runtime=${pc.cyan(m.runtime)} backend=${pc.cyan(m.backend)}  ${pc.dim(target ?? "")}`,
       );
     }
+    const roleLine = (label: string, roles: { plannerModel?: string; implementerModel?: string; summaryModel?: string }) =>
+      `${label} — planner: ${roles.plannerModel ?? "-"}   ` +
+      `implementer: ${roles.implementerModel ?? "-"}   summary: ${roles.summaryModel ?? "-"}`;
+    console.log(pc.dim(`\n${roleLine("defaults", config.defaults)}`));
+    if (Object.values(config.overrides).some(Boolean)) {
+      console.log(pc.dim(`${roleLine("overrides", config.overrides)}  (wins over routing)`));
+    }
+  }),
+});
+
+const ROLE_KEYS: Record<string, ModelRoleKey> = {
+  planner: "plannerModel",
+  implementer: "implementerModel",
+  summary: "summaryModel",
+};
+
+/**
+ * Builds a `set-default` / `set` command. Both point a role at a registered
+ * model; they differ only in which config section they write — `defaults` (the
+ * routing fallback) vs. `overrides` (a hard pin that wins over routing).
+ */
+function definePointerCommand(opts: {
+  name: string;
+  section: ModelSection;
+  /** Noun for messages, e.g. "default" or "override". */
+  noun: string;
+  description: string;
+}) {
+  return defineCommand({
+    meta: { name: opts.name, description: opts.description },
+    args: {
+      role: { type: "positional", required: true, description: "planner | implementer | summary" },
+      model: {
+        type: "positional",
+        required: false,
+        description: "Registered model (name or name@version). Omit with --clear.",
+      },
+      clear: {
+        type: "boolean",
+        default: false,
+        description: `Clear this role's ${opts.noun} instead of setting it`,
+      },
+    },
+    run: action(async ({ args }: { args: Record<string, unknown> }) => {
+      const role = String(args.role).toLowerCase();
+      const key = ROLE_KEYS[role];
+      if (!key) {
+        throw new Error(`Unknown role "${role}". Use one of: planner, implementer, summary.`);
+      }
+
+      if (args.clear) {
+        await clearSectionModel(opts.section, key);
+        await loadConfig();
+        console.log(pc.green(`Cleared ${role} ${opts.noun}`));
+        return void console.log(pc.dim(`  ${CONFIG_PATH}`));
+      }
+
+      if (!args.model) {
+        throw new Error(`A model is required. Usage: hermes model ${opts.name} ${role} <name[@version]>`);
+      }
+      const ref = String(args.model);
+      const config = await loadConfig();
+      // Validates the reference exists (throws with the configured list otherwise).
+      const resolved = resolveModel(config, ref);
+      // The planner and the summary chore both run through the Bedrock Converse path.
+      if ((role === "planner" || role === "summary") && resolved.target.kind !== "bedrock") {
+        throw new Error(
+          `The ${role} model must be bedrock-backed; "${ref}" uses backend "${resolved.backend}".`,
+        );
+      }
+
+      await setSectionModel(opts.section, key, ref);
+      await loadConfig();
+      console.log(pc.green(`Set ${role} ${opts.noun} → ${pc.bold(ref)}`));
+      console.log(pc.dim(`  ${CONFIG_PATH}`));
+    }),
+  });
+}
+
+const modelSetDefault = definePointerCommand({
+  name: "set-default",
+  section: "defaults",
+  noun: "default",
+  description: "Set the fallback planner/implementer/summary model (used when routing has no pick)",
+});
+
+const modelSet = definePointerCommand({
+  name: "set",
+  section: "overrides",
+  noun: "override",
+  description: "Pin a planner/implementer/summary model, overriding intelligent routing",
+});
+
+/** Parses a `--input-price`/`--output-price` string into a nonnegative number. */
+function parsePrice(value: unknown, flag: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(`Invalid ${flag}: "${String(value)}" (expected a nonnegative number).`);
+  }
+  return n;
+}
+
+const modelAdd = defineCommand({
+  meta: {
+    name: "add",
+    description: "Add a model to the config — auto-resolves its Bedrock inference profile via discovery",
+  },
+  args: {
+    name: { type: "positional", required: true, description: "Friendly model name (e.g. claude-sonnet)" },
+    version: { type: "positional", required: true, description: "Version label (e.g. 4.5)" },
+    provider: {
+      type: "string",
+      alias: "p",
+      description: "Provider key (anthropic, meta, …). Derived from the matched model when omitted.",
+    },
+    "model-id": {
+      type: "string",
+      description: "Exact Bedrock model id to bind (as shown by `hermes model discover`)",
+    },
+    "inference-profile": {
+      type: "string",
+      description: "Set the inference-profile id/ARN directly, skipping discovery (escape hatch)",
+    },
+    "api-model-id": {
+      type: "string",
+      description: "Use the first-party Anthropic API backend with this model id (no Bedrock; needs ANTHROPIC_API_KEY)",
+    },
+    "input-price": { type: "string", description: "Pricing: USD per 1M input tokens (hermes runtime)" },
+    "output-price": { type: "string", description: "Pricing: USD per 1M output tokens (hermes runtime)" },
+    region: { type: "string", description: "AWS region for discovery (defaults to AWS_REGION or us-east-1)" },
+    profile: { type: "string", description: "AWS named profile for discovery" },
+  },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    const name = String(args.name);
+    const version = String(args.version);
+    const providerFlag = args.provider ? String(args.provider).toLowerCase() : undefined;
+
+    const inputPrice = args["input-price"];
+    const outputPrice = args["output-price"];
+    let pricing: Pricing | undefined;
+    if (inputPrice !== undefined || outputPrice !== undefined) {
+      pricing = {
+        ...(inputPrice !== undefined ? { inputPer1M: parsePrice(inputPrice, "--input-price") } : {}),
+        ...(outputPrice !== undefined ? { outputPer1M: parsePrice(outputPrice, "--output-price") } : {}),
+      };
+    }
+
+    let entry: ModelInput;
+    if (args["api-model-id"]) {
+      // First-party Anthropic API backend — no Bedrock discovery needed.
+      const provider = providerFlag ?? "anthropic";
+      entry = {
+        name,
+        version,
+        provider,
+        backend: "anthropic",
+        apiModelId: String(args["api-model-id"]),
+        ...(pricing ? { pricing } : {}),
+      };
+    } else if (args["inference-profile"]) {
+      // Explicit target — skip discovery. Provider can't be inferred reliably
+      // from an inference-profile id (it's prefixed by region), so require it.
+      if (!providerFlag) {
+        throw new Error("--inference-profile requires --provider (e.g. -p anthropic).");
+      }
+      entry = {
+        name,
+        version,
+        provider: providerFlag,
+        inferenceProfile: String(args["inference-profile"]),
+        ...(pricing ? { pricing } : {}),
+      };
+    } else {
+      // The common path: resolve the inference profile automatically.
+      const region = args.region as string | undefined;
+      const profile = args.profile as string | undefined;
+      console.error(
+        pc.dim(`# region: ${region ?? process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1"}`),
+      );
+      console.error(pc.dim(`# aws profile: ${profile ?? process.env.AWS_PROFILE ?? "(default provider chain)"}`));
+      console.error(pc.dim("# resolving inference profile via Bedrock discovery…"));
+      const { resolveBinding } = await import("../src/models/select");
+      const binding = await resolveBinding({
+        name,
+        version,
+        provider: providerFlag,
+        modelId: args["model-id"] as string | undefined,
+        region,
+        profile,
+      });
+      console.error(pc.dim(`# matched ${binding.modelId} → ${binding.inferenceProfile}`));
+      entry = {
+        name,
+        version,
+        provider: binding.provider,
+        inferenceProfile: binding.inferenceProfile,
+        ...(pricing ? { pricing } : {}),
+      };
+    }
+
+    const added = await addModelToConfig(entry);
+    // Re-load so a config that no longer parses surfaces immediately.
+    await loadConfig();
+
+    const runtime = added.runtime ?? (added.provider === "anthropic" ? "claude" : "hermes");
+    console.log(pc.green(`Added model ${pc.bold(`${added.name}@${added.version}`)}`) + pc.dim(`  ${added.provider}`));
+    const target = added.backend === "anthropic" ? added.apiModelId : added.inferenceProfile;
+    console.log(pc.dim(`  ${target ?? ""}`));
+    if (runtime === "hermes" && !added.pricing) {
+      console.log(
+        pc.yellow(
+          "  note: no pricing set — cost won't be computed for this hermes-runtime model. " +
+            "Re-add with --input-price/--output-price.",
+        ),
+      );
+    }
+    console.log(pc.dim(`  ${CONFIG_PATH}`));
+  }),
+});
+
+const modelRemove = defineCommand({
+  meta: { name: "remove", description: "Remove a model from the config" },
+  args: {
+    name: { type: "positional", required: true, description: "Model name" },
+    version: { type: "positional", required: false, description: "Version (required when the name has multiple entries)" },
+  },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    const removed = await removeModelFromConfig(
+      String(args.name),
+      args.version ? String(args.version) : undefined,
+    );
+    console.log(pc.green(`Removed model ${pc.bold(`${removed.name}@${removed.version}`)}`));
+    console.log(pc.dim(`  ${CONFIG_PATH}`));
   }),
 });
 
@@ -441,8 +685,8 @@ const modelDiscover = defineCommand({
       : " Add --verify to confirm which actually work for this profile.";
     console.log(
       pc.dim(
-        `\n${ready} ready to use.${verifyNote} Copy a working model's inferenceProfile into a models[] entry` +
-          ` in your config (${CONFIG_PATH}). Mantle entries are gateway-only (DISCOVERED_NOT_VALIDATED).`,
+        `\n${ready} ready to use.${verifyNote} Add one with \`hermes model add <name> <version> --model-id <id>\`` +
+          ` — the inference profile is resolved for you. Mantle entries are gateway-only (DISCOVERED_NOT_VALIDATED).`,
       ),
     );
   }),
@@ -450,7 +694,14 @@ const modelDiscover = defineCommand({
 
 const model = defineCommand({
   meta: { name: "model", description: "Model registry" },
-  subCommands: { list: modelList, discover: modelDiscover },
+  subCommands: {
+    list: modelList,
+    discover: modelDiscover,
+    add: modelAdd,
+    remove: modelRemove,
+    "set-default": modelSetDefault,
+    set: modelSet,
+  },
 });
 
 const project = defineCommand({

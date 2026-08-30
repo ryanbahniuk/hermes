@@ -1,5 +1,6 @@
 import type { HermesConfig } from "../config/schema";
 import { resolveModel } from "../models/registry";
+import { effectiveModelRef } from "../models/routing";
 import {
   createRun,
   createTask,
@@ -51,7 +52,7 @@ export function createPlannerActions(
   plannerRef: string,
 ): PlannerActions {
   const implRef =
-    config.defaults.implementerModel ?? config.defaults.plannerModel ?? plannerRef;
+    effectiveModelRef(config, "implementer") ?? effectiveModelRef(config, "planner") ?? plannerRef;
 
   return {
     listProjects() {

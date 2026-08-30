@@ -4,6 +4,7 @@ import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { defaultRegion } from "../models/chat";
 import { resolveModel } from "../models/registry";
+import { effectiveModelRef } from "../models/routing";
 import { expandHome } from "../paths";
 import type { HermesConfig } from "../config/schema";
 
@@ -59,7 +60,7 @@ export async function generateProjectDescription(
   config: HermesConfig,
   repoPath: string,
 ): Promise<string> {
-  const ref = config.defaults.summaryModel;
+  const ref = effectiveModelRef(config, "summary");
   if (!ref) {
     throw new Error(
       "Auto-generating a description needs `defaults.summaryModel` in your config. " +
