@@ -103,7 +103,25 @@ both.
    hermes project add <name> <path> -d "<description>"
    hermes project list
    hermes model list
+   hermes model discover   # find the Bedrock models your AWS identity can invoke
    ```
+
+   `hermes model discover` inspects your Bedrock account (foundation models +
+   inference profiles) **and** the Mantle gateway catalog, merging both into one
+   list of the chat models you can reach — native entries carry the
+   `inferenceProfile` value to paste into a `models[]` entry. `READY` means a
+   usable application-inference-profile ARN exists; `DISCOVERED_NOT_VALIDATED`
+   marks Mantle gateway entries (visible but not confirmed invokable). Use
+   `--ready-only` to hide the rest, `--profile`/`--region` to target a specific
+   identity, and `--json` for scripting.
+
+   Add `--verify` to actually invoke each model with a minimal prompt and confirm
+   which ones work for *your* profile — native models via the Bedrock Converse API,
+   Mantle models via their signed gateway route. Models are annotated `✓ works` /
+   `✗ fails` (with the failure reason). This catches cases a plain listing can't,
+   e.g. a `READY` application profile whose role still lacks `bedrock:InvokeModel`.
+   These are real, billable inference calls (one per model), so it's opt-in —
+   scope it with `--ready-only` to keep it cheap.
 
 ## Configuration
 
@@ -207,6 +225,8 @@ hermes project list
 hermes project add <name> <path> -d "<description>"   # register a project
 hermes project remove <name>                          # unregister a project
 hermes model list
+hermes model discover       # discover invokable Bedrock + Mantle models and their targets
+hermes model discover --verify  # …and probe each to confirm it works for your profile
 ```
 
 `project add`/`remove` edit `~/.hermes/hermes.config.ts` in place, rewriting only the

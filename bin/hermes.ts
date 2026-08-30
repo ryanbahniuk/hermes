@@ -344,9 +344,113 @@ const projectRemove = defineCommand({
   }),
 });
 
+const modelDiscover = defineCommand({
+  meta: {
+    name: "discover",
+    description: "Discover Bedrock chat models your AWS identity can invoke (+ their inference-profile target)",
+  },
+  args: {
+    profile: { type: "string", description: "AWS named profile (defaults to the standard provider chain / AWS_PROFILE)" },
+    region: { type: "string", description: "AWS region (defaults to AWS_REGION or us-east-1)" },
+    "profile-prefix": {
+      type: "string",
+      description: "Only pick application profiles whose name/id contains this substring",
+    },
+    top: { type: "string", description: "Max models to show per provider (default: all)" },
+    "ready-only": { type: "boolean", default: false, description: "Only show models with a ready invocation target" },
+    verify: {
+      type: "boolean",
+      default: false,
+      description: "Actually invoke each model to confirm it works for this profile (real, billable calls)",
+    },
+    json: { type: "boolean", default: false, description: "Emit raw JSON instead of the grouped view" },
+  },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    const { discoverModels, groupByProvider } = await import("../src/models/discover");
+    const region = (args.region as string | undefined) ?? undefined;
+    const profile = (args.profile as string | undefined) ?? undefined;
+
+    console.error(pc.dim(`# region: ${region ?? process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1"}`));
+    console.error(pc.dim(`# aws profile: ${profile ?? process.env.AWS_PROFILE ?? "(default provider chain)"}`));
+
+    let models = await discoverModels({
+      region,
+      profile,
+      profilePrefix: args["profile-prefix"] as string | undefined,
+    });
+    if (args["ready-only"]) models = models.filter((m) => m.status === "READY");
+
+    if (args.verify && models.length > 0) {
+      const { verifyModels } = await import("../src/models/verify");
+      console.error(
+        pc.dim(`# verifying ${models.length} model(s) with a minimal invocation (real, billable calls)…`),
+      );
+      models = await verifyModels(models, {
+        region,
+        profile,
+        onProgress: (done, total, m) => {
+          const mark = m.verification?.ok ? pc.green("ok") : pc.red("FAIL");
+          process.stderr.write(pc.dim(`  [${done}/${total}] ${mark} ${m.modelId}\n`));
+        },
+      });
+    }
+
+    if (args.json) {
+      console.log(JSON.stringify(models, null, 2));
+      return;
+    }
+
+    if (models.length === 0) {
+      return void console.log(pc.dim("No matching Bedrock chat models found for this identity."));
+    }
+
+    const top = args.top ? parseInt(String(args.top), 10) : 0;
+    const grouped = groupByProvider(models);
+    let ready = 0;
+    let verifiedOk = 0;
+    for (const [provider, list] of grouped) {
+      console.log(`\n${pc.bold(provider)}:`);
+      for (const m of top > 0 ? list.slice(0, top) : list) {
+        if (m.status === "READY") ready++;
+        if (m.verification?.ok) verifiedOk++;
+        const status =
+          m.status === "READY"
+            ? pc.green(m.status)
+            : m.status === "MULTIPLE_APPLICATION_PROFILES"
+              ? pc.yellow(m.status)
+              : pc.dim(m.status);
+        const verify = m.verification
+          ? "  " + (m.verification.ok ? pc.green("✓ works") : pc.red("✗ fails"))
+          : "";
+        console.log(`  ${m.modelId}  ${status}${verify}`);
+        if (m.transport === "mantle") {
+          console.log(`    ${pc.dim("mantle endpoint:")} ${m.endpoint}  ${pc.dim(`(${m.source})`)}`);
+        } else {
+          console.log(`    ${pc.dim("inferenceProfile:")} ${m.target}  ${pc.dim(`(${m.source})`)}`);
+        }
+        if (m.candidates.length > 0) {
+          console.log(pc.dim(`    candidates: ${m.candidates.join(", ")}`));
+        }
+        if (m.verification && !m.verification.ok) {
+          console.log(pc.dim(`    reason: ${m.verification.detail}`));
+        }
+      }
+    }
+    const verifyNote = args.verify
+      ? ` ${verifiedOk} verified working.`
+      : " Add --verify to confirm which actually work for this profile.";
+    console.log(
+      pc.dim(
+        `\n${ready} ready to use.${verifyNote} Copy a working model's inferenceProfile into a models[] entry` +
+          ` in your config (${CONFIG_PATH}). Mantle entries are gateway-only (DISCOVERED_NOT_VALIDATED).`,
+      ),
+    );
+  }),
+});
+
 const model = defineCommand({
   meta: { name: "model", description: "Model registry" },
-  subCommands: { list: modelList },
+  subCommands: { list: modelList, discover: modelDiscover },
 });
 
 const project = defineCommand({
