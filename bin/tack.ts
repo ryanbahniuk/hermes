@@ -456,13 +456,18 @@ const modelAdd = defineCommand({
     const providerFlag = args.provider ? String(args.provider).toLowerCase() : undefined;
     const awsProfileKey = args["aws-profile"] ? String(args["aws-profile"]) : undefined;
 
-    // Resolve the aws-profile key (if given) so discovery authenticates as that
-    // account/region and the written entry is tagged with it.
+    // Resolve the aws-profile discovery authenticates as: an explicit --aws-profile
+    // key, else the config's aws.default (so `tack model add` uses the same identity
+    // as a bare model invocation). The written entry is only *tagged* with an
+    // explicit key below — falling back to the default leaves it untagged so the
+    // model keeps following aws.default at runtime. Skipped for the anthropic
+    // backend, which uses an API key rather than AWS.
     let awsProfile: ResolvedAwsProfile | undefined;
-    if (awsProfileKey) {
+    if (!args["api-model-id"]) {
       const config = await loadConfig();
-      awsProfile = resolveAwsProfile(config.aws, awsProfileKey);
-      if (!awsProfile) {
+      try {
+        awsProfile = resolveAwsProfile(config.aws, awsProfileKey);
+      } catch {
         throw new Error(
           `Unknown aws profile "${awsProfileKey}". Add it with \`tack aws add\` (see \`tack aws list\`).`,
         );
@@ -664,12 +669,18 @@ const modelDiscover = defineCommand({
   run: action(async ({ args }: { args: Record<string, unknown> }) => {
     const { discoverModels, groupByProvider } = await import("../src/models/discover");
 
-    // A config aws-profile key supplies creds + region; explicit --profile/--region override.
+    // A config aws-profile supplies creds + region; explicit --profile/--region
+    // override. With no --aws-profile we still resolve the config's aws.default,
+    // so a bare `tack model discover` authenticates the same way models do.
+    const config = await loadConfig();
+    const awsProfileKey = args["aws-profile"] ? String(args["aws-profile"]) : undefined;
     let awsProfile: ResolvedAwsProfile | undefined;
-    if (args["aws-profile"]) {
-      const config = await loadConfig();
-      awsProfile = resolveAwsProfile(config.aws, String(args["aws-profile"]));
-      if (!awsProfile) throw new Error(`Unknown aws profile "${String(args["aws-profile"])}".`);
+    try {
+      awsProfile = resolveAwsProfile(config.aws, awsProfileKey);
+    } catch {
+      throw new Error(
+        `Unknown aws profile "${awsProfileKey}". Add it with \`tack aws add\` (see \`tack aws list\`).`,
+      );
     }
     const region = (args.region as string | undefined) ?? awsProfile?.region;
     const profile = (args.profile as string | undefined) ?? awsProfile?.profile;
@@ -680,6 +691,8 @@ const modelDiscover = defineCommand({
         `# aws profile: ${awsProfile ? `${awsProfile.key} (${awsProfile.profile})` : profile ?? process.env.AWS_PROFILE ?? "(default provider chain)"}`,
       ),
     );
+    // Drive `aws sso login` and assert the account before discovery when bound.
+    if (awsProfile) await ensureAuth(awsProfile, { autoLogin: true });
 
     let models = await discoverModels({
       region,
