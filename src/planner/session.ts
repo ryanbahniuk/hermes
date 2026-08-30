@@ -1,4 +1,4 @@
-import type { HermesConfig } from "../config/schema";
+import type { TackConfig } from "../config/schema";
 import { resolveModel, type ResolvedModel } from "../models/registry";
 import { effectiveModelRef } from "../models/routing";
 import { costFromPricing, type TokenTotals } from "../orchestrator/execute";
@@ -22,7 +22,7 @@ import {
 import { plannerScoping } from "./tools";
 
 const SYSTEM = [
-  "You are the Hermes planner: the human's thinking partner for multi-repo development work.",
+  "You are the Tack planner: the human's thinking partner for multi-repo development work.",
   "",
   "Your job is to PLAN and DELEGATE — never to implement. You do not and cannot write or edit code.",
   "A swarm of background worker agents does the actual work; you decide what they do.",
@@ -56,7 +56,7 @@ export class PlannerSession {
   }
 
   /** Starts a fresh session with the given (or default) planner model. */
-  static start(config: HermesConfig, modelRef?: string): PlannerSession {
+  static start(config: TackConfig, modelRef?: string): PlannerSession {
     const ref = modelRef ?? effectiveModelRef(config, "planner");
     if (!ref) throw new Error("No model given and no defaults.plannerModel configured.");
     const model = resolveModel(config, ref);
@@ -67,7 +67,7 @@ export class PlannerSession {
   }
 
   /** Reopens an existing session, rehydrating conversation state for its runtime. */
-  static open(config: HermesConfig, sessionId: string): PlannerSession {
+  static open(config: TackConfig, sessionId: string): PlannerSession {
     const row = getSession(sessionId);
     if (!row) throw new Error(`No such session: ${sessionId}`);
     const ref = row.planner_model;
@@ -126,7 +126,7 @@ export class PlannerSession {
     const reply = assistantParts.join("\n").trim();
     if (reply) addSessionMessage({ sessionId: this.id, role: "assistant", content: reply });
 
-    // Cost: claude reports it directly; hermes derives it from tokens + pricing.
+    // Cost: claude reports it directly; tack derives it from tokens + pricing.
     const delta =
       runtimeCost !== undefined ? runtimeCost : this.model.pricing ? costFromPricing(this.model.pricing, tokens) : 0;
     if (delta > 0) addSessionCost(this.id, delta);
@@ -134,7 +134,7 @@ export class PlannerSession {
 }
 
 function buildRuntime(
-  config: HermesConfig,
+  config: TackConfig,
   sessionId: string,
   plannerRef: string,
   model: ResolvedModel,

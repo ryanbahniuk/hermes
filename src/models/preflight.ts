@@ -1,4 +1,4 @@
-import type { HermesConfig } from "../config/schema";
+import type { TackConfig } from "../config/schema";
 import { ensureAuth, type EnsureAuthOptions, type ResolvedAwsProfile } from "./aws";
 import { resolveModel } from "./registry";
 import { effectiveModelRef } from "./routing";
@@ -14,7 +14,7 @@ import { effectiveModelRef } from "./routing";
 
 /** The distinct bedrock aws profiles used by the given model refs, deduped by key. */
 export function awsProfilesForRefs(
-  config: HermesConfig,
+  config: TackConfig,
   refs: Array<string | undefined>,
 ): ResolvedAwsProfile[] {
   const seen = new Map<string, ResolvedAwsProfile>();
@@ -35,7 +35,7 @@ export function awsProfilesForRefs(
 
 /** The model refs a session/run will actually use: planner, implementer, summary. */
 export function sessionModelRefs(
-  config: HermesConfig,
+  config: TackConfig,
   plannerOverride?: string,
 ): Array<string | undefined> {
   return [
@@ -49,10 +49,10 @@ export function sessionModelRefs(
  * Ensures every aws profile a session/run will use is authenticated (and on the
  * expected account). `autoLogin` should be true only in interactive contexts (a
  * TTY exists to complete the browser flow); the supervisor passes it false and
- * fails with a `hermes aws login` hint instead. Returns the profiles it checked.
+ * fails with a `tack aws login` hint instead. Returns the profiles it checked.
  */
 export async function ensureSessionAuth(
-  config: HermesConfig,
+  config: TackConfig,
   opts: { plannerOverride?: string } & EnsureAuthOptions = {},
 ): Promise<ResolvedAwsProfile[]> {
   const profiles = awsProfilesForRefs(config, sessionModelRefs(config, opts.plannerOverride));

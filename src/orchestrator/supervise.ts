@@ -57,7 +57,7 @@ export async function supervise(runId: string): Promise<void> {
 
       // Confirm the planner's AWS profile is authenticated and on the expected
       // account before spending. No TTY here (detached supervisor), so no auto-
-      // login — a stale session fails with a `hermes aws login` hint.
+      // login — a stale session fails with a `tack aws login` hint.
       if (plannerModel.aws) await ensureAuth(plannerModel.aws);
 
       appendLog(runLog, `planning with ${plannerRef}…`);

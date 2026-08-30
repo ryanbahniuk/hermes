@@ -146,7 +146,7 @@ export async function addProjectToConfig(
   path = CONFIG_PATH,
 ): Promise<Project> {
   if (!existsSync(path)) {
-    throw new Error(`No config found at ${path}. Run \`hermes init\` to create one.`);
+    throw new Error(`No config found at ${path}. Run \`tack init\` to create one.`);
   }
   const project = ProjectSchema.parse(input);
   const existing = await readProjects(path);
@@ -163,7 +163,7 @@ export async function removeProjectFromConfig(
   path = CONFIG_PATH,
 ): Promise<Project> {
   if (!existsSync(path)) {
-    throw new Error(`No config found at ${path}. Run \`hermes init\` to create one.`);
+    throw new Error(`No config found at ${path}. Run \`tack init\` to create one.`);
   }
   const existing = await readProjects(path);
   const removed = existing.find((p) => p.name === name);
@@ -241,7 +241,7 @@ export async function addModelToConfig(
   path = CONFIG_PATH,
 ): Promise<ModelInput> {
   if (!existsSync(path)) {
-    throw new Error(`No config found at ${path}. Run \`hermes init\` to create one.`);
+    throw new Error(`No config found at ${path}. Run \`tack init\` to create one.`);
   }
   const model = ModelInputSchema.parse(input);
   // Surfaces "backend bedrock requires inferenceProfile", etc., before we write.
@@ -264,7 +264,7 @@ export async function removeModelFromConfig(
   path = CONFIG_PATH,
 ): Promise<ModelInput> {
   if (!existsSync(path)) {
-    throw new Error(`No config found at ${path}. Run \`hermes init\` to create one.`);
+    throw new Error(`No config found at ${path}. Run \`tack init\` to create one.`);
   }
   const existing = await readModels(path);
   const matches = existing.filter(
@@ -370,7 +370,7 @@ export async function setSectionModel(
   path = CONFIG_PATH,
 ): Promise<RoleModels> {
   if (!existsSync(path)) {
-    throw new Error(`No config found at ${path}. Run \`hermes init\` to create one.`);
+    throw new Error(`No config found at ${path}. Run \`tack init\` to create one.`);
   }
   const current = await readSection(path, section);
   const next = { ...current, [key]: ref };
@@ -449,7 +449,7 @@ export async function addAwsProfileToConfig(
   path = CONFIG_PATH,
 ): Promise<{ aws: AwsConfig; isDefault: boolean }> {
   if (!existsSync(path)) {
-    throw new Error(`No config found at ${path}. Run \`hermes init\` to create one.`);
+    throw new Error(`No config found at ${path}. Run \`tack init\` to create one.`);
   }
   if (!key.trim()) throw new Error("A profile key is required.");
   const parsed = AwsProfileSchema.parse(profile);
@@ -475,7 +475,7 @@ export async function removeAwsProfileFromConfig(
   path = CONFIG_PATH,
 ): Promise<AwsProfile> {
   if (!existsSync(path)) {
-    throw new Error(`No config found at ${path}. Run \`hermes init\` to create one.`);
+    throw new Error(`No config found at ${path}. Run \`tack init\` to create one.`);
   }
   const current = await readAws(path);
   const removed = current.profiles[key];
@@ -505,7 +505,7 @@ export async function setDefaultAwsProfile(
   path = CONFIG_PATH,
 ): Promise<AwsConfig> {
   if (!existsSync(path)) {
-    throw new Error(`No config found at ${path}. Run \`hermes init\` to create one.`);
+    throw new Error(`No config found at ${path}. Run \`tack init\` to create one.`);
   }
   const current = await readAws(path);
   if (key !== null && !current.profiles[key]) {
@@ -524,7 +524,7 @@ export async function clearSectionModel(
   path = CONFIG_PATH,
 ): Promise<RoleModels> {
   if (!existsSync(path)) {
-    throw new Error(`No config found at ${path}. Run \`hermes init\` to create one.`);
+    throw new Error(`No config found at ${path}. Run \`tack init\` to create one.`);
   }
   const current = await readSection(path, section);
   const next = { ...current };

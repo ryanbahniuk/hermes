@@ -1,7 +1,7 @@
 import * as readline from "node:readline";
 import { stdin, stdout } from "node:process";
 import pc from "picocolors";
-import type { HermesConfig } from "../config/schema";
+import type { TackConfig } from "../config/schema";
 import { db, listRunsBySession, sessionTotalCost } from "../db";
 import { isAlive } from "../process/spawn";
 import { PlannerSession } from "../planner/session";
@@ -48,16 +48,16 @@ const HELP = [
   "  Commands:",
   "    /runs     list runs dispatched from this session",
   "    /help     show this help",
-  "    /exit     leave the session (it's saved; resume with `hermes session start --resume <id>`)",
+  "    /exit     leave the session (it's saved; resume with `tack session start --resume <id>`)",
 ].join("\n");
 
 /**
- * The interactive planning REPL — Hermes's primary interface. You converse with a
+ * The interactive planning REPL — Tack's primary interface. You converse with a
  * planner agent that clarifies requirements and delegates to the worker swarm; the
  * session persists so it never "disappears" between commands.
  */
 export async function runChat(
-  config: HermesConfig,
+  config: TackConfig,
   opts: { modelRef?: string; resume?: string },
 ): Promise<void> {
   db();
@@ -67,7 +67,7 @@ export async function runChat(
     : PlannerSession.start(config, opts.modelRef);
 
   stdout.write(
-    pc.green(`Hermes planning session ${pc.bold(session.id)}`) +
+    pc.green(`Tack planning session ${pc.bold(session.id)}`) +
       pc.dim(`  (${session.model.name}@${session.model.version}, runtime=${session.model.runtime})`) +
       "\n",
   );
@@ -127,5 +127,5 @@ export async function runChat(
   }
   rl.close();
 
-  stdout.write(pc.dim(`\nSession saved: ${session.id}. Resume with \`hermes session start --resume ${session.id}\`.\n`));
+  stdout.write(pc.dim(`\nSession saved: ${session.id}. Resume with \`tack session start --resume ${session.id}\`.\n`));
 }

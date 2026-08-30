@@ -17,11 +17,11 @@ import {
   modelIdForModel,
   READ_PATH_FIELDS,
 } from "../runtimes/claude";
-import { contentToText, eventsFor } from "../runtimes/hermes";
+import { contentToText, eventsFor } from "../runtimes/tack";
 import { assertReadable, type Scoping } from "../tools/ops";
 import type { AgentEvent } from "../runtimes/types";
 import type { PlannerActions } from "./actions";
-import { createClaudePlannerServer, createHermesPlannerTools } from "./tools";
+import { createClaudePlannerServer, createTackPlannerTools } from "./tools";
 
 /** A planner turn streams the same normalized events as an implementation agent. */
 export type PlannerEvent = AgentEvent;
@@ -39,13 +39,13 @@ export interface PlannerContext {
   scoping: Scoping;
   /** claude only: the SDK session id to resume a prior conversation. */
   resumeRef?: string;
-  /** hermes only: the transcript to seed conversation state on resume. */
+  /** tack only: the transcript to seed conversation state on resume. */
   history?: PriorMessage[];
 }
 
 /** A multi-turn planning conversation. Unlike AgentRuntime, it accepts many turns. */
 export interface PlannerRuntime {
-  readonly kind: "claude" | "hermes";
+  readonly kind: "claude" | "tack";
   /** Send one user turn; stream events until the assistant yields the turn back. */
   send(text: string): AsyncIterable<PlannerEvent>;
 }
@@ -54,8 +54,8 @@ export function selectPlannerRuntime(ctx: PlannerContext): PlannerRuntime {
   switch (ctx.model.runtime) {
     case "claude":
       return new ClaudePlannerRuntime(ctx);
-    case "hermes":
-      return new HermesPlannerRuntime(ctx);
+    case "tack":
+      return new TackPlannerRuntime(ctx);
   }
 }
 
@@ -112,7 +112,7 @@ class ClaudePlannerRuntime implements PlannerRuntime {
           disallowedTools: CLAUDE_DISALLOWED,
           canUseTool,
           hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
-          mcpServers: { hermes_planner: createClaudePlannerServer(ctx.actions) },
+          mcpServers: { tack_planner: createClaudePlannerServer(ctx.actions) },
           systemPrompt: ctx.systemPrompt,
           ...(this.resumeRef ? { resume: this.resumeRef } : {}),
         },
@@ -166,9 +166,9 @@ function readScopeViolation(scoping: Scoping, toolName: string, toolInput: unkno
   return null;
 }
 
-/** The `hermes` planner: a LangGraph react agent; conversation state kept in-process. */
-class HermesPlannerRuntime implements PlannerRuntime {
-  readonly kind = "hermes" as const;
+/** The `tack` planner: a LangGraph react agent; conversation state kept in-process. */
+class TackPlannerRuntime implements PlannerRuntime {
+  readonly kind = "tack" as const;
   private messages: BaseMessage[];
 
   constructor(private readonly ctx: PlannerContext) {
@@ -189,7 +189,7 @@ class HermesPlannerRuntime implements PlannerRuntime {
 
     const agent = createReactAgent({
       llm,
-      tools: createHermesPlannerTools(ctx.actions, ctx.scoping),
+      tools: createTackPlannerTools(ctx.actions, ctx.scoping),
       prompt: ctx.systemPrompt,
     });
 

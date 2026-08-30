@@ -7,8 +7,8 @@ import {
   type BaseMessage,
 } from "@langchain/core/messages";
 import { createChatModel } from "../models/chat";
-import { createHermesTools } from "../tools/hermes-tools";
-import { createHermesCoordinationTools } from "../tools/coordination";
+import { createTackTools } from "../tools/tack-tools";
+import { createTackCoordinationTools } from "../tools/coordination";
 import type { AgentEvent, AgentRuntime, AgentTask } from "./types";
 
 export function contentToText(content: unknown): string {
@@ -24,7 +24,7 @@ export function contentToText(content: unknown): string {
 function systemPrompt(task: AgentTask): string {
   const allow = task.scoping.readAllowlist.join(", ") || "(none)";
   const lines = [
-    "You are a Hermes implementation agent working in an isolated git worktree.",
+    "You are a Tack implementation agent working in an isolated git worktree.",
     "",
     `Working directory (your worktree): ${task.scoping.worktree}`,
     `Read-only directories you may also read: ${allow}`,
@@ -45,9 +45,9 @@ function systemPrompt(task: AgentTask): string {
   return lines.join("\n");
 }
 
-/** The `hermes` runtime: a LangGraph react agent over Bedrock Converse. */
-export class HermesRuntime implements AgentRuntime {
-  readonly kind = "hermes" as const;
+/** The `tack` runtime: a LangGraph react agent over Bedrock Converse. */
+export class TackRuntime implements AgentRuntime {
+  readonly kind = "tack" as const;
 
   async *run(task: AgentTask): AsyncIterable<AgentEvent> {
     let llm;
@@ -63,7 +63,7 @@ export class HermesRuntime implements AgentRuntime {
 
     const agent = createReactAgent({
       llm,
-      tools: [...createHermesTools(task.scoping), ...createHermesCoordinationTools(task.coordination)],
+      tools: [...createTackTools(task.scoping), ...createTackCoordinationTools(task.coordination)],
       prompt: systemPrompt(task),
       checkpointer: new MemorySaver(),
     });

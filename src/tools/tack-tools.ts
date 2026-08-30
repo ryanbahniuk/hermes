@@ -3,10 +3,10 @@ import { z } from "zod";
 import * as ops from "./ops";
 
 /**
- * Builds the worktree-scoped LangChain tools for the `hermes` runtime. All file
+ * Builds the worktree-scoped LangChain tools for the `tack` runtime. All file
  * ops are bound to `scoping`; thrown errors are surfaced to the model as tool errors.
  */
-export function createHermesTools(scoping: ops.Scoping) {
+export function createTackTools(scoping: ops.Scoping) {
   const readFile = tool(({ path }) => ops.opRead(scoping, path), {
     name: "read_file",
     description: "Read a file. Allowed within the worktree and the read allowlist.",

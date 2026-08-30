@@ -2,8 +2,8 @@ node_modules/
 *.db
 *.db-wal
 *.db-shm
-.hermes/
-.hermes-test/
+.tack/
+.tack-test/
 .context/
 dist/
 *.log

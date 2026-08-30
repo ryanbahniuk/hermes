@@ -1,4 +1,4 @@
-import type { HermesConfig, Pricing } from "../config/schema";
+import type { TackConfig, Pricing } from "../config/schema";
 import { resolveModel, type ResolvedModel } from "../models/registry";
 import { selectRuntime } from "../runtimes";
 import { ensureWorktree, removeWorktree, type Worktree } from "../worktree/worktree";
@@ -46,11 +46,11 @@ export function costFromPricing(pricing: Pricing, t: TokenTotals): number {
 
 /**
  * Executes one existing task row to completion: worktree → runtime → stream →
- * persist tokens/cost/status. The reusable core for both `hermes agent`
+ * persist tokens/cost/status. The reusable core for both `tack agent`
  * (foreground) and the detached supervisor.
  */
 export async function executeTask(
-  config: HermesConfig,
+  config: TackConfig,
   task: TaskRow,
   opts: { keepWorktree?: boolean; onEvent?: (line: string) => void; adjudicator?: ResolvedModel } = {},
   preResolved?: ResolvedModel,

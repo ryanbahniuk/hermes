@@ -1,16 +1,16 @@
 #!/usr/bin/env bun
-// Compiles Hermes into a single, self-contained executable (embeds the Bun
-// runtime + all JS). Output: dist/hermes.
+// Compiles Tack into a single, self-contained executable (embeds the Bun
+// runtime + all JS). Output: dist/tack.
 //
-//   bun run build   # -> dist/hermes
+//   bun run build   # -> dist/tack
 //
 // `react-devtools-core` is an optional peer that Ink only imports when
 // DEV=true. A standalone binary has no node_modules to resolve it from, so we
 // replace it with an empty stub — that dev-only code path never runs here.
 
 const result = await Bun.build({
-  entrypoints: ["./bin/hermes.ts"],
-  compile: { outfile: "dist/hermes" },
+  entrypoints: ["./bin/tack.ts"],
+  compile: { outfile: "dist/tack" },
   plugins: [
     {
       name: "stub-react-devtools-core",

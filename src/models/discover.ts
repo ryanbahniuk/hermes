@@ -13,7 +13,7 @@ import { listMantleModelIds, mantleRoute } from "./mantle";
 /**
  * Self-discovery of the Bedrock chat models the authenticated AWS identity can
  * reach, and the invocation target (an inference-profile id/ARN) to drop into a
- * model's `inferenceProfile` in the Hermes config.
+ * model's `inferenceProfile` in the Tack config.
  *
  * Two catalogs are merged transparently:
  *   - Native Bedrock (`find_bedrock_ids.py`): list foundation models, list
@@ -55,7 +55,7 @@ export interface DiscoveredModel {
   source: string;
   /** Mantle HTTP endpoint for this model (mantle transport only). */
   endpoint?: string;
-  /** Result of actually invoking the model — present only after `hermes model discover --verify`. */
+  /** Result of actually invoking the model — present only after `tack model discover --verify`. */
   verification?: Verification;
 }
 

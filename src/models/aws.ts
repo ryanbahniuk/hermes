@@ -73,7 +73,7 @@ export interface CallerIdentity {
 
 /**
  * Resolves the caller identity through the *JS SDK* credential path (the same one
- * the runtimes use), so this verifies exactly what Hermes will authenticate with —
+ * the runtimes use), so this verifies exactly what Tack will authenticate with —
  * not merely what the `aws` CLI can see. Returns the identity, or throws with a
  * name we can classify (see `isAuthError`).
  */
@@ -179,8 +179,8 @@ export async function ensureAuth(
 export function describeAuthError(err: unknown, profile: ResolvedAwsProfile | undefined): string {
   const message = err instanceof Error ? err.message : String(err);
   const hint = profile
-    ? `Run: hermes aws login ${profile.key}`
-    : "Run `aws sso login` (or set AWS_PROFILE), or define an aws profile with `hermes aws add`.";
+    ? `Run: tack aws login ${profile.key}`
+    : "Run `aws sso login` (or set AWS_PROFILE), or define an aws profile with `tack aws add`.";
   if (isAuthError(err)) {
     return `AWS credentials for ${profile ? `"${profile.key}"` : "the default chain"} are missing or expired. ${hint}`;
   }

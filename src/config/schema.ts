@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const RuntimeKind = z.enum(["claude", "hermes"]);
+export const RuntimeKind = z.enum(["claude", "tack"]);
 export const BackendKind = z.enum(["bedrock", "anthropic"]);
 
 /**
@@ -40,7 +40,7 @@ export const ProjectSchema = z.object({
 export type Project = z.infer<typeof ProjectSchema>;
 
 /** Optional pricing, in USD per 1M tokens, for computing cost when the runtime
- * doesn't report one (the `hermes` runtime). The `claude` runtime uses the SDK's
+ * doesn't report one (the `tack` runtime). The `claude` runtime uses the SDK's
  * reported cost and ignores this. */
 export const PricingSchema = z.object({
   inputPer1M: z.number().nonnegative().optional(),
@@ -70,7 +70,7 @@ export interface Model {
   name: string;
   version: string;
   provider: string;
-  runtime: "claude" | "hermes";
+  runtime: "claude" | "tack";
   backend: "bedrock" | "anthropic";
   inferenceProfile?: string;
   apiModelId?: string;
@@ -85,7 +85,7 @@ export interface Model {
  * Throws with a clear message on violation.
  */
 export function normalizeModel(m: ModelInput): Model {
-  const runtime = m.runtime ?? (m.provider === "anthropic" ? "claude" : "hermes");
+  const runtime = m.runtime ?? (m.provider === "anthropic" ? "claude" : "tack");
   const backend = m.backend ?? "bedrock";
   const where = `model "${m.name}@${m.version}"`;
 
@@ -102,8 +102,8 @@ export function normalizeModel(m: ModelInput): Model {
   if (backend === "bedrock" && !m.inferenceProfile) {
     throw new Error(`backend "bedrock" requires "inferenceProfile" (${where})`);
   }
-  if (runtime === "hermes" && backend !== "bedrock") {
-    throw new Error(`runtime "hermes" requires backend "bedrock" (${where})`);
+  if (runtime === "tack" && backend !== "bedrock") {
+    throw new Error(`runtime "tack" requires backend "bedrock" (${where})`);
   }
   if (m.awsProfile && backend !== "bedrock") {
     throw new Error(`"awsProfile" only applies to a bedrock backend (${where})`);
@@ -151,10 +151,10 @@ export const ConfigSchema = z.object({
 });
 
 /** Shape accepted from a user's config file (before normalization). */
-export type HermesConfigInput = z.input<typeof ConfigSchema>;
+export type TackConfigInput = z.input<typeof ConfigSchema>;
 
 /** Fully resolved config used throughout the app. */
-export interface HermesConfig {
+export interface TackConfig {
   projects: Project[];
   models: Model[];
   aws: AwsConfig;

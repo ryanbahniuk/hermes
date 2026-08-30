@@ -19,7 +19,7 @@ export interface Verdict {
 }
 
 const SYSTEM = [
-  "You are the coordinator/adjudicator for Hermes, a multi-repo development harness.",
+  "You are the coordinator/adjudicator for Tack, a multi-repo development harness.",
   "An implementation agent has proposed an amendment to the shared cross-project contract.",
   "Trust the existing contract by DEFAULT — reject unless the proposal is clearly justified",
   "and materially improves cross-project consistency or correctness.",

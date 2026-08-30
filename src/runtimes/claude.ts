@@ -97,7 +97,7 @@ function systemAppend(task: AgentTask): string {
   const allow = task.scoping.readAllowlist.join(", ") || "(none)";
   const lines = [
     "",
-    "You are running as a Hermes implementation agent in an isolated git worktree.",
+    "You are running as a Tack implementation agent in an isolated git worktree.",
     `Worktree (your working directory): ${task.scoping.worktree}`,
     `Additional read-only directories: ${allow}`,
     "Write and edit files only inside the worktree. Finish with a concise summary of your changes.",
@@ -108,8 +108,8 @@ function systemAppend(task: AgentTask): string {
       "Shared coordination context (the cross-project contract — conform to it):",
       task.sharedContext,
       "",
-      "Use the mcp__hermes__read_shared_context tool to re-read it. If you believe the contract",
-      "is wrong, call mcp__hermes__propose_amendment (sparingly); otherwise conform.",
+      "Use the mcp__tack__read_shared_context tool to re-read it. If you believe the contract",
+      "is wrong, call mcp__tack__propose_amendment (sparingly); otherwise conform.",
     );
   }
   return lines.join("\n");
@@ -164,7 +164,7 @@ export class ClaudeRuntime implements AgentRuntime {
           disallowedTools: DISALLOWED_TOOLS,
           canUseTool,
           hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
-          mcpServers: { hermes: createClaudeCoordinationServer(task.coordination) },
+          mcpServers: { tack: createClaudeCoordinationServer(task.coordination) },
           systemPrompt: { type: "preset", preset: "claude_code", append: systemAppend(task) },
         },
       });

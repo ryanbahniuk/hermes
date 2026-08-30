@@ -1,6 +1,6 @@
-# Hermes — Architecture
+# Tack — Architecture
 
-Hermes is a personal, local development harness. You hand it a **problem statement**;
+Tack is a personal, local development harness. You hand it a **problem statement**;
 it decides which of your locally checked-out projects are relevant, spins up an
 isolated git worktree in each, and dispatches background agents (any model on AWS
 Bedrock) to work the problem in parallel — coordinating them through a shared
@@ -38,27 +38,27 @@ foundation model can be an agent, Anthropic or not.
 |---|---|---|
 | Runtime / package manager / bundler | **Bun** | `bun build --compile` for distribution later |
 | Language | **TypeScript** | |
-| Orchestration | **Plain Hermes TS** in the supervisor process | not a graph framework — explicit control flow |
+| Orchestration | **Plain Tack TS** in the supervisor process | not a graph framework — explicit control flow |
 | Agent runtime (Anthropic models) | **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`) | reuses its tools, permissions, subagents, session resume |
 | Agent runtime (non-Anthropic models) | **LangGraph TS** `createReactAgent` + **`@langchain/aws` `ChatBedrockConverse`** | our tools + SQLite checkpointer |
 | Runtime selection | **`AgentRuntime` interface** | supervisor picks per task from the model registry |
 | Persistence (run state) | **`bun:sqlite`** | our tables: runs, tasks, shared_context, amendments |
-| Persistence (agent state) | **per-runtime** | SDK sessions (`claude`) / LangGraph checkpointer over `bun:sqlite` (`hermes`) |
+| Persistence (agent state) | **per-runtime** | SDK sessions (`claude`) / LangGraph checkpointer over `bun:sqlite` (`tack`) |
 
 > **Reversal (implementation):** we originally chose `better-sqlite3` everywhere so the
 > official LangGraph SQLite checkpointer would work unmodified. In practice
 > `better-sqlite3@13`'s native N-API bindings **crash Bun 1.3.14** on open
 > (`NAPI FATAL ERROR`). We switched run-state persistence to Bun's built-in `bun:sqlite`
-> (zero native addon, works cleanly). Consequence for step 6: the `hermes` runtime needs a
+> (zero native addon, works cleanly). Consequence for step 6: the `tack` runtime needs a
 > **custom checkpointer over `bun:sqlite`** rather than the official `better-sqlite3` one.
 | Background execution | **detached supervisor process per run** | survives CLI exit; resumable |
 | Isolation | **git worktree per project** | filesystem isolation |
 | CLI | **citty** + **Ink** (dashboard) + **@clack/prompts** + **picocolors** | |
-| Config | **typed `hermes.config.ts`** | project registry + model registry + read allowlist |
+| Config | **typed `tack.config.ts`** | project registry + model registry + read allowlist |
 
 **The Option-C trade-off (accepted):** two agent runtimes means agent *behavior* isn't
 byte-identical across models — different tool implementations and quirks. We minimize the
-divergence with (1) shared Hermes coordination tools, (2) one common scoping/permission
+divergence with (1) shared Tack coordination tools, (2) one common scoping/permission
 config, (3) a normalized event/cost shape. For a personal harness this is a fine trade for
 true any-model support.
 
@@ -66,7 +66,7 @@ true any-model support.
 
 ## Core concepts
 
-- **Project** — a locally checked-out repo Hermes may use. Registered in config with
+- **Project** — a locally checked-out repo Tack may use. Registered in config with
   `{ name, path, description }`. The `description` is load-bearing: the planner reasons over
   it to select relevant projects.
 - **Run** — one problem statement and everything spawned to solve it. Carries the planner
@@ -76,7 +76,7 @@ true any-model support.
 - **Supervisor** — the detached process that owns a run end-to-end (plan → fan-out →
   adjudicate → reconcile), written as plain TS control flow.
 - **Agent runtime** — a pluggable engine that actually runs an agent. Two implementations:
-  `ClaudeRuntime` and `HermesRuntime` (LangGraph). Selected per task by model.
+  `ClaudeRuntime` and `TackRuntime` (LangGraph). Selected per task by model.
 - **Shared context** — a versioned, run-level artifact (the agreed contract / cross-project
   interface). Authored by the planner, read by every implementer, enforced at reconcile.
 - **Model registry** — `{ name, version, provider, runtime, inferenceProfile, awsProfile? }` entries.
@@ -98,7 +98,7 @@ AgentTask = {
   prompt, cwd (= worktree path), model,
   sharedContextRef,                    // current contract version to read
   scoping: { worktree, readAllowlist },// enforced by both runtimes
-  tools: HermesToolset,
+  tools: TackToolset,
 }
 
 AgentEvent = log | tool_call | usage(costTokens)
@@ -111,43 +111,43 @@ runtime-agnostic.
 ### Two implementations
 
 **`ClaudeRuntime`** (Anthropic models) — wraps the Claude Agent SDK. Reuses the SDK's
-native tools and permission system; we only add Hermes coordination tools and enforce scoping
+native tools and permission system; we only add Tack coordination tools and enforce scoping
 via hooks. Supports two backends, chosen per model (see [registry](#model-layer--registry)):
 - `bedrock` (default) — `CLAUDE_CODE_USE_BEDROCK=1` + AWS creds; model = inference profile.
 - `anthropic` — first-party Anthropic API; `ANTHROPIC_API_KEY` from env; model = `apiModelId`.
 
-**`HermesRuntime`** (any other Bedrock model) — a LangGraph `createReactAgent` driven by
+**`TackRuntime`** (any other Bedrock model) — a LangGraph `createReactAgent` driven by
 `ChatBedrockConverse`, with our own worktree-scoped tools and the `better-sqlite3`
 checkpointer for resume.
 
 ### How the two satisfy one contract
 
-| Capability | `HermesRuntime` (LangGraph) | `ClaudeRuntime` (Agent SDK) |
+| Capability | `TackRuntime` (LangGraph) | `ClaudeRuntime` (Agent SDK) |
 |---|---|---|
 | read (worktree ∪ allowlist) | our LangChain tool, path-checked | SDK **Read** + `PreToolUse` hook path check |
 | write / edit (worktree only) | our tools | SDK **Write/Edit** + permission deny outside worktree |
 | search | our ripgrep tool | SDK **Grep/Glob** |
 | shell (cwd = worktree) | our tool | SDK **Bash** |
 | git (worktree only) | our tool | SDK **Bash** (git) |
-| `read_shared_context` | **Hermes tool (shared, identical effect)** | **Hermes in-process tool (shared)** |
-| `propose_amendment` | **Hermes tool (shared)** | **Hermes in-process tool (shared)** |
+| `read_shared_context` | **Tack tool (shared, identical effect)** | **Tack in-process tool (shared)** |
+| `propose_amendment` | **Tack tool (shared)** | **Tack in-process tool (shared)** |
 | agent-state resume | LangGraph checkpointer (thread = taskId) | SDK session (`resume_ref` = session id) |
 
 The **coordination tools** (`read_shared_context`, `propose_amendment`) are the one place we
-inject the *same* Hermes-authored tool into both runtimes, so cross-project coordination
+inject the *same* Tack-authored tool into both runtimes, so cross-project coordination
 behaves identically regardless of model.
 
 ---
 
 ## Planning sessions (the primary interface)
 
-The front door to Hermes is an **interactive planning session**, not a one-shot command. You
+The front door to Tack is an **interactive planning session**, not a one-shot command. You
 converse with a **planner agent** whose sole job is to clarify requirements and **delegate** —
 it never edits code. This keeps the powerful, expensive model on planning and hands the actual
 work to a swarm of (possibly cheaper) workers.
 
 ```
-hermes session start   (foreground; `hermes` with no subcommand does the same)
+tack session start   (foreground; `tack` with no subcommand does the same)
    │  PlannerSession: one persisted `sessions` row + one long-lived PlannerRuntime instance
    │
    ├─ turn ↔ turn conversation with the user (transcript persisted to `session_messages`)
@@ -163,19 +163,19 @@ hermes session start   (foreground; `hermes` with no subcommand does the same)
 
 - **Model-agnostic like the workers.** The planner is a `PlannerRuntime` with two
   implementations mirroring the `AgentRuntime` split: `claude` (Claude Agent SDK, resumed per
-  turn via the SDK session id) and `hermes` (LangGraph react agent; conversation state kept as
+  turn via the SDK session id) and `tack` (LangGraph react agent; conversation state kept as
   an in-process message list, seeded from the persisted transcript on resume). `selectPlannerRuntime`
   picks by the planner model's runtime.
 - **Read-only by construction.** The planner's filesystem scope spans every configured project
   root + the read allowlist, with *no* writable worktree. The `claude` planner denies
-  Write/Edit/Bash via a `PreToolUse` hook (reads are path-checked); the `hermes` planner is
+  Write/Edit/Bash via a `PreToolUse` hook (reads are path-checked); the `tack` planner is
   simply given only read tools. Work happens only through `delegate`.
 - **Delegation is the only entry point.** `delegate` drives the run/supervisor/worker machinery;
   a delegated run carries a `session_id` tag. There is no public CLI command to start a run — a
   session is the sole way to kick off work. The planner may name projects + per-project subtasks
   explicitly (it has conversation context) or omit them and let the supervisor's own planner select.
 - **Persisted + resumable.** Sessions, their transcripts, resume handle, and rolled-up cost live
-  in SQLite. `hermes session start --resume <id>` reopens the conversation; `hermes session list` lists them.
+  in SQLite. `tack session start --resume <id>` reopens the conversation; `tack session list` lists them.
 
 ## Execution model
 
@@ -195,7 +195,7 @@ delegate("problem")  ───────────────────�
         ├─ FAN-OUT     create a git worktree per selected project → one task each
         │
         ├─ IMPL ×N     parallel. Each task runs via the AgentRuntime chosen from its model:
-        │   (parallel)   Claude model → ClaudeRuntime · other model → HermesRuntime.
+        │   (parallel)   Claude model → ClaudeRuntime · other model → TackRuntime.
         │                Each reads shared context; may call propose_amendment.
         │
         ├─ ADJUDICATE  powerful model resolves amendment proposals: accept → version-bump
@@ -211,7 +211,7 @@ delegate("problem")  ───────────────────�
 - Parallelism still holds: agent work is I/O-bound on Bedrock; `shell`/`git` are real OS
   subprocesses via `Bun.spawn`.
 - Resilience is explicit: orchestration progress is persisted in SQLite, and each agent's
-  conversation resumes via its runtime. `hermes run retry <run>` replays.
+  conversation resumes via its runtime. `tack run retry <run>` replays.
 - Still "background": the detached property holds at the *run* level.
 
 Worktrees provide **filesystem** isolation; we deliberately drop per-agent **process**
@@ -221,7 +221,7 @@ isolation in favor of one supervisor + resume.
 
 ## Process lifecycle & management
 
-There is **no always-on `hermes` daemon** — zero background footprint when idle. Instead,
+There is **no always-on `tack` daemon** — zero background footprint when idle. Instead,
 **one ephemeral supervisor process per active run**, which self-terminates when the run ends.
 
 ```
@@ -240,16 +240,16 @@ resident:
 
 | Command | Behavior |
 |---|---|
-| `hermes run list` / `hermes task list` | Read SQLite; pid-liveness-check the supervisor → show **running** vs **crashed/stalled**. |
-| `hermes run logs <run> -f` | Tail the per-run log file. |
-| `hermes run stop <run>` | Read `supervisor_pid`, send SIGTERM. |
-| `hermes run retry <run>` | Respawn a supervisor; skip done tasks, resume in-flight ones from their runtime state. |
-| `hermes session show <session>` | Print the session's Run → Task tree (top-down view). |
+| `tack run list` / `tack task list` | Read SQLite; pid-liveness-check the supervisor → show **running** vs **crashed/stalled**. |
+| `tack run logs <run> -f` | Tail the per-run log file. |
+| `tack run stop <run>` | Read `supervisor_pid`, send SIGTERM. |
+| `tack run retry <run>` | Respawn a supervisor; skip done tasks, resume in-flight ones from their runtime state. |
+| `tack session show <session>` | Print the session's Run → Task tree (top-down view). |
 
 **Terminal close vs. reboot:** detaching (new session + unref) means closing your terminal or
 shell does **not** kill a run; a machine reboot **does** (these are plain processes, not a
-launchd service). After a reboot, mid-flight runs sit in SQLite with a dead pid; `hermes run list`
-flags them stalled and `hermes retry` picks them up. Auto-resume-on-boot is a later opt-in
+launchd service). After a reboot, mid-flight runs sit in SQLite with a dead pid; `tack run list`
+flags them stalled and `tack retry` picks them up. Auto-resume-on-boot is a later opt-in
 (wrap retry in a launchd agent).
 
 ---
@@ -285,7 +285,7 @@ runtime satisfies it per the [runtime table](#how-the-two-satisfy-one-contract))
 - `search` — ripgrep, worktree only.
 - `shell` — run commands (cwd = worktree).
 - `git` — worktree only.
-- `read_shared_context` / `propose_amendment` — Hermes coordination tools, identical in both
+- `read_shared_context` / `propose_amendment` — Tack coordination tools, identical in both
   runtimes.
 
 **Read allowlist:** a configured list of directories the read tool may also read (read-only).
@@ -296,7 +296,7 @@ boundary on the *read tool*, not on `shell`. `shell` is trusted by design in v1.
 
 ## Data model
 
-**Source of truth for registries is the config file** (`hermes.config.ts`) — projects, models,
+**Source of truth for registries is the config file** (`tack.config.ts`) — projects, models,
 allowlist. **SQLite holds runtime/run state.** Agent conversation state lives per-runtime.
 
 ```
@@ -316,7 +316,7 @@ tasks
   worktree_path text
   status        text  -- pending | implementing | proposing | paused | reconciling | done | failed
   model         text
-  runtime       text  -- 'claude' | 'hermes'
+  runtime       text  -- 'claude' | 'tack'
   resume_ref    text  -- SDK session id | LangGraph checkpoint thread id
   cost          real
   diff_ref      text  -- pointer to captured diff/patch
@@ -343,8 +343,8 @@ sessions                    -- planning conversations (the primary interface)
   id            text  pk
   title         text        -- derived from the first user message
   planner_model text
-  runtime       text        -- 'claude' | 'hermes'
-  resume_ref    text        -- claude SDK session id (null for hermes)
+  runtime       text        -- 'claude' | 'tack'
+  resume_ref    text        -- claude SDK session id (null for tack)
   status        text        -- active | closed
   cost          real        -- planner-conversation cost only; the session TOTAL
                             --   (planner + every delegated task's cost) is derived
@@ -361,7 +361,7 @@ session_messages            -- persisted transcript, for resume + replay
 
 runs.session_id  text       -- nullable; links a delegated swarm back to its session
 
--- plus LangGraph checkpoint tables (better-sqlite3), used only by HermesRuntime tasks
+-- plus LangGraph checkpoint tables (better-sqlite3), used only by TackRuntime tasks
 ```
 
 ---
@@ -370,10 +370,10 @@ runs.session_id  text       -- nullable; links a delegated swarm back to its ses
 
 - **Registry entries:** `{ name, version, provider, runtime, backend, ...target }`.
   - `provider` — e.g. `anthropic` | `meta` | `mistral` | `amazon` | …
-  - `runtime` — `claude` for Anthropic, `hermes` otherwise (inferred from provider,
-    overridable — e.g. run Claude through `hermes` for uniform tooling).
+  - `runtime` — `claude` for Anthropic, `tack` otherwise (inferred from provider,
+    overridable — e.g. run Claude through `tack` for uniform tooling).
   - `backend` — `bedrock` (default) | `anthropic`. `anthropic` is valid **only** for
-    `provider: anthropic` + `runtime: claude`. `hermes` and all non-Anthropic providers
+    `provider: anthropic` + `runtime: claude`. `tack` and all non-Anthropic providers
     ⇒ `bedrock` only.
   - **target id** (depends on backend): `inferenceProfile` for `bedrock`, `apiModelId`
     (e.g. `claude-sonnet-4-5`) for `anthropic`.
@@ -388,18 +388,18 @@ runs.session_id  text       -- nullable; links a delegated swarm back to its ses
   SDK and the Claude SDK subprocess) are pinned to it, so **different models can run in
   different accounts/regions**. Before use, `ensureAuth` calls `sts:GetCallerIdentity` through
   the JS SDK path and asserts the resolved account equals `account` — a mismatch stops loudly
-  instead of misrouting. Interactive entry points (`hermes session start`, `hermes aws login`,
-  `hermes model add --aws-profile`) drive `aws sso login` on an expired session; the detached
-  supervisor re-verifies non-interactively and fails with a `hermes aws login <key>` hint.
-  Managed via `hermes aws {list,add,remove,set-default,login,whoami}`. With no profiles
+  instead of misrouting. Interactive entry points (`tack session start`, `tack aws login`,
+  `tack model add --aws-profile`) drive `aws sso login` on an expired session; the detached
+  supervisor re-verifies non-interactively and fails with a `tack aws login <key>` hint.
+  Managed via `tack aws {list,add,remove,set-default,login,whoami}`. With no profiles
   configured, models fall back to the default AWS provider chain (pre-config behavior).
 - **Credentials:** `bedrock` → the model's aws profile, else the default AWS credential chain
   (SSO profiles expected); `anthropic` → `ANTHROPIC_API_KEY` **from the environment, never
   stored in the config file**.
 
 > **Operational note (two credential paths):** the `claude` runtime resolves AWS creds via
-> the Claude Agent SDK's bundled CLI (Hermes passes it `AWS_PROFILE`/`AWS_REGION` derived from
-> the model's aws profile), while the `hermes` runtime **and the planner** resolve creds via
+> the Claude Agent SDK's bundled CLI (Tack passes it `AWS_PROFILE`/`AWS_REGION` derived from
+> the model's aws profile), while the `tack` runtime **and the planner** resolve creds via
 > `@langchain/aws` → the in-process JS AWS SDK (pinned to the same profile's credentials).
 > These can differ: an environment where the CLI works (e.g. SSO the CLI understands) may
 > still fail the JS chain with "Could not load credentials from any providers". The account
@@ -413,25 +413,25 @@ runs.session_id  text       -- nullable; links a delegated swarm back to its ses
 
 # Grouped by the three model concepts — session / run / task — plus cross-cutting commands.
 ```
-hermes [session start] [--model <name>] [--resume <sessionId>]  # primary interface: planning session
-hermes session list                                         # list planning sessions
-hermes session show <sessionId>                             # a session's run/task tree
+tack [session start] [--model <name>] [--resume <sessionId>]  # primary interface: planning session
+tack session list                                         # list planning sessions
+tack session show <sessionId>                             # a session's run/task tree
                                                             # (work is kicked off only via a session's delegate)
 
-hermes run list [--status <s>]                              # list runs
-hermes run show <run>                                       # detail: context, amendments, diffs
-hermes run logs <run> [-f]                                  # tail the per-run log
-hermes run stop <run>                                       # SIGTERM the supervisor
-hermes run retry <run>                                      # respawn supervisor from state
+tack run list [--status <s>]                              # list runs
+tack run show <run>                                       # detail: context, amendments, diffs
+tack run logs <run> [-f]                                  # tail the per-run log
+tack run stop <run>                                       # SIGTERM the supervisor
+tack run retry <run>                                      # respawn supervisor from state
 
-hermes task list [<run>]                                    # list tasks/agents
-hermes task logs <task> [-f]                                # tail the per-task log
+tack task list [<run>]                                    # list tasks/agents
+tack task logs <task> [-f]                                # tail the per-task log
 
-hermes watch                                                # Ink live dashboard
+tack watch                                                # Ink live dashboard
 
-hermes project add <path>                                   # read README + CLAUDE.md → draft description → write config
-hermes project list | rm <name>
-hermes model list
+tack project add <path>                                   # read README + CLAUDE.md → draft description → write config
+tack project list | rm <name>
+tack model list
 ```
 
 ---
@@ -440,26 +440,26 @@ hermes model list
 
 ```
 bin/
-  hermes.ts          # CLI entry (citty), Bun shebang
+  tack.ts          # CLI entry (citty), Bun shebang
   supervisor.ts      # detached supervisor entrypoint: `bun supervisor.ts <runId>`
 src/
   cli/               # citty commands + Ink dashboard + chat REPL (cli/chat.ts)
-  config/            # load hermes.config.ts; project/model registries; allowlist
+  config/            # load tack.config.ts; project/model registries; allowlist
   models/            # registry resolution → { runtime, inferenceProfile }
-  planner/           # planning sessions: PlannerRuntime (claude|hermes), actions,
+  planner/           # planning sessions: PlannerRuntime (claude|tack), actions,
                      #   delegation/read-only tools, session orchestration
   orchestrator/      # plain-TS supervisor: plan, fanout, adjudicate, reconcile
   runtimes/
     index.ts         # AgentRuntime interface + selection
     claude.ts        # ClaudeRuntime (Claude Agent SDK)
-    hermes.ts        # HermesRuntime (LangGraph + ChatBedrockConverse)
-  tools/             # worktree-scoped read/write/edit/search/shell/git (HermesRuntime) +
+    tack.ts        # TackRuntime (LangGraph + ChatBedrockConverse)
+  tools/             # worktree-scoped read/write/edit/search/shell/git (TackRuntime) +
                      # shared coordination tools (read_shared_context, propose_amendment)
   worktree/          # git worktree create/cleanup
   db/                # better-sqlite3 connection, migrations, repositories
   process/           # detached spawn, lifecycle, signals, pid liveness
   logging/           # per-run / per-task log files
-hermes.config.ts     # user config (projects, models, allowlist)
+tack.config.ts     # user config (projects, models, allowlist)
 docs/architecture.md # this file
 ```
 
@@ -469,7 +469,7 @@ docs/architecture.md # this file
 
 1. ✅ **Foundations** — config loading, model registry (+ provider/runtime), DB schema/migrations
    (`bun:sqlite`, not `better-sqlite3`), detached-process + logging plumbing.
-2. ✅ **`AgentRuntime` interface + `HermesRuntime`** — LangGraph react agent, our worktree-scoped
+2. ✅ **`AgentRuntime` interface + `TackRuntime`** — LangGraph react agent, our worktree-scoped
    tools + read allowlist. (Persistent checkpointer resume still uses in-memory `MemorySaver`.)
 3. ✅ **`ClaudeRuntime`** — wraps the Claude Agent SDK on Bedrock/Anthropic; tools/permissions/scoping
    via hooks; both runtimes satisfy the same contract.
@@ -481,13 +481,13 @@ docs/architecture.md # this file
 7. ✅ **Live amendments + adjudication** — option (b): `propose_amendment` is adjudicated synchronously
    by the powerful model (accept → version-bump; reject → conform; degrades to queuing). *Deferred
    live test* — the adjudicator uses `ChatBedrockConverse` (credential note).
-8. ✅ **Ink dashboard (`hermes watch`) + `hermes show` + cost accounting.**
+8. ✅ **Ink dashboard (`tack watch`) + `tack show` + cost accounting.**
 
 Status: all eight steps implemented and typecheck-clean. Live-verified via the `claude` runtime:
 single/parallel agents, tools + scoping, lifecycle, coordination tools, reconcile. Not yet
 live-verified (JS-SDK credential gap in the dev environment): the planner, the adjudicator, and the
-`hermes` runtime — all use `ChatBedrockConverse`. Remaining polish: a persistent `bun:sqlite`
-checkpointer for the `hermes` runtime (step-2 note), a leaner background-agent system prompt to cut
+`tack` runtime — all use `ChatBedrockConverse`. Remaining polish: a persistent `bun:sqlite`
+checkpointer for the `tack` runtime (step-2 note), a leaner background-agent system prompt to cut
 the ~$0.22 preset overhead per `claude` task.
 
 ---
@@ -496,6 +496,6 @@ the ~$0.22 preset overhead per `claude` task.
 
 - Coordinated *dependent* changes beyond a shared contract (e.g. staged rollout ordering).
 - Hard sandbox around `shell` if the read allowlist must be a true boundary.
-- Auto-resume-on-boot (launchd agent wrapping `hermes retry`).
+- Auto-resume-on-boot (launchd agent wrapping `tack retry`).
 - Remote / multi-user execution.
 - `bun build --compile` single-binary distribution.

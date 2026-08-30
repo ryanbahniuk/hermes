@@ -35,7 +35,7 @@ function Dashboard() {
 
   return (
     <Box flexDirection="column" padding={1}>
-      <Text bold>Hermes — live dashboard</Text>
+      <Text bold>Tack — live dashboard</Text>
       {runs.length === 0 && <Text dimColor>No runs yet.</Text>}
       {runs.map((r) => {
         const runTasks = tasks.filter((t) => t.run_id === r.id);

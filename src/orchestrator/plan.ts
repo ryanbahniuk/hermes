@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { createChatModel } from "../models/chat";
-import type { HermesConfig } from "../config/schema";
+import type { TackConfig } from "../config/schema";
 import type { ResolvedModel } from "../models/registry";
 
 const PlanSchema = z.object({
@@ -30,7 +30,7 @@ export interface PlanResult {
 }
 
 const SYSTEM = [
-  "You are the planner for Hermes, a multi-repo development harness.",
+  "You are the planner for Tack, a multi-repo development harness.",
   "Given a problem and a list of locally available projects (name + description):",
   "1. Select ONLY the projects relevant to the problem (choose exclusively from the listed names).",
   "2. Write a focused, self-contained subtask for each selected project's agent.",
@@ -45,7 +45,7 @@ const SYSTEM = [
  * Uses the Bedrock Converse API directly (structured output) — no tools needed.
  */
 export async function plan(
-  config: HermesConfig,
+  config: TackConfig,
   plannerModel: ResolvedModel,
   problem: string,
 ): Promise<PlanResult> {

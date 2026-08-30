@@ -1,4 +1,4 @@
-# Hermes
+# Tack
 
 A personal, local development harness. Its primary interface is an **interactive planning
 session**: you chat with a **planner agent** that clarifies requirements and — once the goal is
@@ -7,7 +7,7 @@ itself; it plans, investigates read-only, and dispatches. Workers run in isolate
 across your locally checked-out projects, coordinated through a shared contract so cross-repo
 changes stay consistent.
 
-- **Interactive planner** as the front door (`hermes session start`, or just `hermes`) — an ongoing,
+- **Interactive planner** as the front door (`tack session start`, or just `tack`) — an ongoing,
   resumable conversation, not a fire-and-forget command.
 - **Model-agnostic** over Bedrock (Claude, Llama, Mistral, Nova, …) for both the planner and the
   workers; Anthropic models can also run via the first-party API.
@@ -30,103 +30,103 @@ five minutes. See [`docs/architecture.md`](docs/architecture.md) for the full de
 ## Install
 
 ```bash
-git clone <this repo> && cd hermes
+git clone <this repo> && cd tack
 bun install
 ```
 
 Run the CLI during development with:
 
 ```bash
-bun run hermes <command>          # e.g. bun run hermes init
+bun run tack <command>          # e.g. bun run tack init
 ```
 
-### A global `hermes` command
+### A global `tack` command
 
-Two ways to get `hermes` on your `PATH`:
+Two ways to get `tack` on your `PATH`:
 
 **Standalone binary (recommended).** Compile a single self-contained executable that embeds
 the Bun runtime — no `bun` or repo checkout needed at runtime:
 
 ```bash
-bun run build                     # -> dist/hermes
-install -m 755 dist/hermes ~/.local/bin/hermes   # any dir on your PATH (e.g. /usr/local/bin)
-hermes --help
+bun run build                     # -> dist/tack
+install -m 755 dist/tack ~/.local/bin/tack   # any dir on your PATH (e.g. /usr/local/bin)
+tack --help
 ```
 
 Rebuild (`bun run build`) and re-copy after pulling changes.
 
-**Dev symlink.** `bun link` puts `hermes` in `~/.bun/bin`, but it's just a symlink back into
+**Dev symlink.** `bun link` puts `tack` in `~/.bun/bin`, but it's just a symlink back into
 this repo — it still needs the repo checked out and `bun` installed. Make sure `~/.bun/bin` is
-on your `PATH` first (Bun's installer usually does this, but verify with `which hermes` after
+on your `PATH` first (Bun's installer usually does this, but verify with `which tack` after
 linking):
 
 ```bash
 # If ~/.bun/bin isn't on your PATH yet, add this to ~/.zshrc / ~/.bashrc:
 export PATH="$HOME/.bun/bin:$PATH"
 
-bun link                          # then: hermes <command>
+bun link                          # then: tack <command>
 ```
 
-The examples below use `hermes <command>`; substitute `bun run hermes <command>` if you skip
+The examples below use `tack <command>`; substitute `bun run tack <command>` if you skip
 both.
 
 ## Setup
 
-1. **Initialize** the Hermes home directory and a starter config:
+1. **Initialize** the Tack home directory and a starter config:
 
    ```bash
-   hermes init
+   tack init
    ```
 
-   This creates `~/.hermes/` containing `hermes.config.ts` (your config), `hermes.db` (state),
-   and `logs/`. Override the location with `HERMES_HOME=/path hermes …`.
+   This creates `~/.tack/` containing `tack.config.ts` (your config), `tack.db` (state),
+   and `logs/`. Override the location with `TACK_HOME=/path tack …`.
 
 2. **Configure AWS profiles.** Register the account(s)/region(s) your Bedrock models live in
-   as named **aws profiles**, so each model authenticates as its own identity — and Hermes can
+   as named **aws profiles**, so each model authenticates as its own identity — and Tack can
    drive `aws sso login` and verify you're on the expected account for you:
 
    ```bash
    # key            shared-config profile                         account         region
-   hermes aws add coding-tools \
+   tack aws add coding-tools \
      --profile coding-tools-aws-coding-tools-bedrock \
      --region us-east-1 --login          # --login runs `aws sso login`, then fills --account from STS
-   hermes aws list                        # profiles, their accounts/regions, and which models use each
-   hermes aws whoami                      # verify every profile's identity (checks the account matches)
-   hermes aws login [key]                 # sign in to one profile, or all of them
+   tack aws list                        # profiles, their accounts/regions, and which models use each
+   tack aws whoami                      # verify every profile's identity (checks the account matches)
+   tack aws login [key]                 # sign in to one profile, or all of them
    ```
 
    Each profile pins a shared-config `profile`, its 12-digit `account` (asserted via
    `sts:GetCallerIdentity` so a wrong or expired profile fails loudly instead of silently
    hitting another account), and the `region` its inference profiles live in. A model selects
-   one with `awsProfile: "<key>"`; `hermes aws set-default <key>` sets the fallback for models
+   one with `awsProfile: "<key>"`; `tack aws set-default <key>` sets the fallback for models
    that don't name one. **Different models can live in different accounts** — a planner in one,
    an implementer in another — and each is authenticated and account-verified independently.
    Starting a session preflights every profile it will use (driving `aws sso login` when a
    session has expired); the background supervisor re-verifies non-interactively and stops with
-   a `hermes aws login <key>` hint rather than misrouting.
+   a `tack aws login <key>` hint rather than misrouting.
 
-   If you configure **no** aws profiles, Hermes falls back to the default AWS provider chain
+   If you configure **no** aws profiles, Tack falls back to the default AWS provider chain
    (`AWS_PROFILE` / `AWS_REGION` / env creds) exactly as before — the feature is opt-in.
 
    > **Note — two credential paths.** The `claude` runtime resolves creds via the Claude
-   > Agent SDK's CLI (Hermes passes it `AWS_PROFILE`/`AWS_REGION` from the model's aws profile),
-   > while the `hermes` runtime **and the planner/adjudicator** resolve creds via the in-process
+   > Agent SDK's CLI (Tack passes it `AWS_PROFILE`/`AWS_REGION` from the model's aws profile),
+   > while the `tack` runtime **and the planner/adjudicator** resolve creds via the in-process
    > JS AWS SDK (pinned to the same profile). An environment where only the CLI works (e.g.
    > certain SSO setups) will fail the planner with *"Could not load credentials"*. Make sure the
    > JS SDK default chain can load the profile's creds.
 
-3. **Register your projects and models** in `~/.hermes/hermes.config.ts`. Both
+3. **Register your projects and models** in `~/.tack/tack.config.ts`. Both
    registries have CLI commands, so you never have to hand-edit the file:
 
    ```bash
-   hermes project add <name> <path> -d "<description>"
-   hermes project list
-   hermes model discover   # find the Bedrock models your AWS identity can invoke
-   hermes model add <name> <version> --model-id <id>   # add one (profile auto-resolved)
-   hermes model list
+   tack project add <name> <path> -d "<description>"
+   tack project list
+   tack model discover   # find the Bedrock models your AWS identity can invoke
+   tack model add <name> <version> --model-id <id>   # add one (profile auto-resolved)
+   tack model list
    ```
 
-   `hermes model discover` inspects your Bedrock account (foundation models +
+   `tack model discover` inspects your Bedrock account (foundation models +
    inference profiles) **and** the Mantle gateway catalog, merging both into one
    list of the chat models you can reach. `READY` means a usable
    application-inference-profile ARN exists; `DISCOVERED_NOT_VALIDATED` marks
@@ -134,18 +134,18 @@ both.
    `--ready-only` to hide the rest, `--profile`/`--region` to target a specific
    identity, and `--json` for scripting.
 
-   `hermes model add` then registers one **without you ever touching an inference
+   `tack model add` then registers one **without you ever touching an inference
    profile**: give it a friendly `<name> <version>` plus the Bedrock `--model-id`
    from discover (or let it match by `--provider` + name/version), and it resolves
    the READY application-inference-profile ARN for you and writes the entry.
    Escape hatches: `--inference-profile <arn>` (set the target directly, skip
    discovery) and `--api-model-id <id>` (first-party Anthropic API backend
-   instead of Bedrock). Pass `--aws-profile <key>` (a key from `hermes aws list`)
+   instead of Bedrock). Pass `--aws-profile <key>` (a key from `tack aws list`)
    to bind the model to a specific account/region — discovery then authenticates
    as that profile (driving `aws sso login` if needed) and the entry is tagged so
    it always runs there. Add `--input-price`/`--output-price` (USD per 1M tokens)
    for non-Anthropic models so cost can be computed. Remove one with
-   `hermes model remove <name> [version]`.
+   `tack model remove <name> [version]`.
 
    Add `--verify` to actually invoke each model with a minimal prompt and confirm
    which ones work for *your* profile — native models via the Bedrock Converse API,
@@ -158,29 +158,29 @@ both.
    Pick which registered models each role uses (roles: `planner`, `implementer`,
    `summary`). Two levels, checked in this order:
 
-   - `hermes model set <role> <name[@version]>` → `overrides` — a **hard pin**
+   - `tack model set <role> <name[@version]>` → `overrides` — a **hard pin**
      that wins over intelligent routing. Use it to force a specific model.
-   - `hermes model set-default <role> <name[@version]>` → `defaults` — the
+   - `tack model set-default <role> <name[@version]>` → `defaults` — the
      **fallback** the router falls back to when it has no strong pick.
 
    Full precedence per role: an explicit `--model` flag → override → intelligent
    routing (planned) → default. The planner and summary roles must be
    bedrock-backed; the implementer may be any registered model. `--clear` unsets
-   a role in either section, and `hermes model list` prints both.
+   a role in either section, and `tack model list` prints both.
 
 ## Configuration
 
-`~/.hermes/hermes.config.ts` must `export default` a config object:
+`~/.tack/tack.config.ts` must `export default` a config object:
 
 ```ts
 export default {
-  // Locally checked-out repos Hermes may use. The description guides the planner.
+  // Locally checked-out repos Tack may use. The description guides the planner.
   projects: [
     { name: "api", path: "~/code/api", description: "Backend REST API service." },
     { name: "web", path: "~/code/web", description: "React web frontend." },
   ],
 
-  // Named AWS identities models authenticate through (manage with `hermes aws …`).
+  // Named AWS identities models authenticate through (manage with `tack aws …`).
   // Each pins a shared-config profile, its account (verified via STS), and region.
   aws: {
     profiles: {
@@ -190,7 +190,7 @@ export default {
   },
 
   // Models available to the planner and implementers.
-  //   runtime     defaults: provider "anthropic" -> "claude", otherwise -> "hermes".
+  //   runtime     defaults: provider "anthropic" -> "claude", otherwise -> "tack".
   //   backend     defaults to "bedrock".
   //   awsProfile  key into aws.profiles; falls back to aws.default.
   models: [
@@ -206,8 +206,8 @@ export default {
     // { name: "claude-sonnet", version: "4.5-api", provider: "anthropic",
     //   backend: "anthropic", apiModelId: "claude-sonnet-4-5" },
 
-    // A non-Anthropic Bedrock model runs through the "hermes" runtime. Add pricing
-    // (USD per 1M tokens) so cost can be computed — the hermes runtime has no
+    // A non-Anthropic Bedrock model runs through the "tack" runtime. Add pricing
+    // (USD per 1M tokens) so cost can be computed — the tack runtime has no
     // SDK-reported cost like the claude runtime does.
     // { name: "llama", version: "3.3-70b", provider: "meta",
     //   inferenceProfile: "us.meta.llama3-3-70b-instruct-v1:0",
@@ -233,11 +233,11 @@ Key fields:
 | Field | Notes |
 |---|---|
 | `projects[].path` | Must be a **git repository root**. `~` is expanded. |
-| `models[].runtime` | `claude` (Claude Agent SDK) or `hermes` (LangGraph + Bedrock Converse). Inferred from `provider`, overridable. |
+| `models[].runtime` | `claude` (Claude Agent SDK) or `tack` (LangGraph + Bedrock Converse). Inferred from `provider`, overridable. |
 | `models[].backend` | `bedrock` (default) or `anthropic` (first-party API; `claude` runtime + `provider: anthropic` only). |
 | `models[].awsProfile` | Key into `aws.profiles` — the account/region/profile this bedrock model authenticates through. Falls back to `aws.default`. |
-| `models[].pricing` | Optional USD-per-1M-token rates; used to compute cost for the `hermes` runtime. |
-| `aws.profiles` | Named AWS identities (`{ profile, account?, region? }`). `account` is asserted via STS so a wrong/expired profile fails loudly. Manage with `hermes aws …`. |
+| `models[].pricing` | Optional USD-per-1M-token rates; used to compute cost for the `tack` runtime. |
+| `aws.profiles` | Named AWS identities (`{ profile, account?, region? }`). `account` is asserted via STS so a wrong/expired profile fails loudly. Manage with `tack aws …`. |
 | `aws.default` | Profile key used by bedrock models that don't set `awsProfile`. Omit to use the default AWS provider chain. |
 | `readAllowlist` | Directories the read tool may read outside the worktree. (`shell` is trusted and not bounded by this.) |
 
@@ -246,12 +246,12 @@ Key fields:
 ### The primary interface: a planning session
 
 ```bash
-hermes                             # open a planning session (bare == `hermes session start`)
-hermes session start               # same thing, explicit
-hermes session start --model claude-sonnet
-hermes session start --resume <sessionId>   # or: hermes --resume <sessionId>
-hermes session list                # list your planning sessions
-hermes session show <sessionId>    # its run/task tree (top-down view)
+tack                             # open a planning session (bare == `tack session start`)
+tack session start               # same thing, explicit
+tack session start --model claude-sonnet
+tack session start --resume <sessionId>   # or: tack --resume <sessionId>
+tack session list                # list your planning sessions
+tack session show <sessionId>    # its run/task tree (top-down view)
 ```
 
 You then just talk to the planner. It asks clarifying questions, reads your projects
@@ -271,54 +271,54 @@ grouping the verbs that act on it (plus the top-level `watch`, `init`, `model`, 
 
 ```bash
 # Inspect
-hermes run list             # list runs (running / stalled / done / failed + cost)
-hermes task list [<run>]    # list tasks/agents (optionally filtered to one run)
-hermes run show <run>       # a run's contract, tasks, amendments
-hermes session show <sess>  # a session's run/task tree (top-down view)
-hermes run logs <run> [-f]  # tail a run's log (-f to follow)
-hermes task logs <task> [-f]# tail a task's log
-hermes watch                # live Ink dashboard (press q to quit)
+tack run list             # list runs (running / stalled / done / failed + cost)
+tack task list [<run>]    # list tasks/agents (optionally filtered to one run)
+tack run show <run>       # a run's contract, tasks, amendments
+tack session show <sess>  # a session's run/task tree (top-down view)
+tack run logs <run> [-f]  # tail a run's log (-f to follow)
+tack task logs <task> [-f]# tail a task's log
+tack watch                # live Ink dashboard (press q to quit)
 
 # Control
-hermes run stop <run>       # SIGTERM the run's supervisor
-hermes run retry <run>      # respawn the supervisor to re-run incomplete tasks
+tack run stop <run>       # SIGTERM the run's supervisor
+tack run retry <run>      # respawn the supervisor to re-run incomplete tasks
 
 # Registries
-hermes project list
-hermes project add <name> <path> -d "<description>"   # register a project
-hermes project remove <name>                          # unregister a project
-hermes model list
-hermes model discover       # discover invokable Bedrock + Mantle models and their targets
-hermes model discover --verify  # …and probe each to confirm it works for your profile
-hermes model add <name> <version> --model-id <id>   # register one (inference profile auto-resolved)
-hermes model remove <name> [version]                # unregister a model
-hermes model set-default planner <name[@version]>     # fallback planner model
-hermes model set-default implementer <name[@version]> # fallback implementer model
-hermes model set implementer <name[@version]>         # hard pin (overrides routing)
-hermes model set <role> --clear                       # remove an override
+tack project list
+tack project add <name> <path> -d "<description>"   # register a project
+tack project remove <name>                          # unregister a project
+tack model list
+tack model discover       # discover invokable Bedrock + Mantle models and their targets
+tack model discover --verify  # …and probe each to confirm it works for your profile
+tack model add <name> <version> --model-id <id>   # register one (inference profile auto-resolved)
+tack model remove <name> [version]                # unregister a model
+tack model set-default planner <name[@version]>     # fallback planner model
+tack model set-default implementer <name[@version]> # fallback implementer model
+tack model set implementer <name[@version]>         # hard pin (overrides routing)
+tack model set <role> --clear                       # remove an override
 
 # AWS profiles (accounts/regions models authenticate through)
-hermes aws list                          # profiles, accounts/regions, and which models use each
-hermes aws add <key> --profile <name> --region <r> --login   # add one; --login signs in + fills account
-hermes aws login [key]                   # `aws sso login` + verify one profile, or all of them
-hermes aws whoami [key]                  # verify identity/account without logging in
-hermes aws set-default <key>             # profile for models that don't name one (--clear to unset)
-hermes aws remove <key>                  # unregister a profile (refused while a model uses it)
+tack aws list                          # profiles, accounts/regions, and which models use each
+tack aws add <key> --profile <name> --region <r> --login   # add one; --login signs in + fills account
+tack aws login [key]                   # `aws sso login` + verify one profile, or all of them
+tack aws whoami [key]                  # verify identity/account without logging in
+tack aws set-default <key>             # profile for models that don't name one (--clear to unset)
+tack aws remove <key>                  # unregister a profile (refused while a model uses it)
 ```
 
-`project add`/`remove` and `model add`/`remove` edit `~/.hermes/hermes.config.ts` in place,
+`project add`/`remove` and `model add`/`remove` edit `~/.tack/tack.config.ts` in place,
 rewriting only the relevant array and leaving everything else — your other entries, comments,
 and formatting — untouched. (Quote a project path — `'~/code/api'` — if you want the literal
 `~` preserved rather than shell-expanded.)
 
 A delegated run returns immediately with a run id; a **detached supervisor process** does the
 work in the background (it survives your terminal closing). Worktrees are created under
-`~/.hermes/worktrees/<run>/<project>` and kept so you can review and merge the agents' changes.
+`~/.tack/worktrees/<run>/<project>` and kept so you can review and merge the agents' changes.
 
 ## How it works (in brief)
 
 ```
-hermes session start  →  interactive planning session (foreground, one planner agent)
+tack session start  →  interactive planning session (foreground, one planner agent)
    ├─ clarifies requirements with you (multi-turn conversation, persisted + resumable)
    ├─ investigates your projects read-only (it cannot edit code)
    └─ delegate(problem[, projects, sharedContext])  ─┐  (a tool the planner calls)
@@ -331,8 +331,8 @@ hermes session start  →  interactive planning session (foreground, one planner
 ```
 
 The planner runs on either runtime (claude via the Claude Agent SDK, or any Bedrock model via
-LangGraph), same as the workers. State lives in SQLite (`~/.hermes/hermes.db`) — including
-sessions and their transcripts; logs in `~/.hermes/logs/<run>/`. There is no always-on daemon —
+LangGraph), same as the workers. State lives in SQLite (`~/.tack/tack.db`) — including
+sessions and their transcripts; logs in `~/.tack/logs/<run>/`. There is no always-on daemon —
 only the foreground chat and active runs have a process.
 
 ## Development
@@ -345,5 +345,5 @@ bun run typecheck     # tsc --noEmit
 
 All core functionality is implemented. Live-verified on the `claude` runtime (single + parallel
 agents, scoped tools, supervisor lifecycle, coordination tools, reconcile). The planner,
-adjudicator, and `hermes` runtime use the Bedrock Converse API and require a JS-SDK-resolvable
+adjudicator, and `tack` runtime use the Bedrock Converse API and require a JS-SDK-resolvable
 credential path (see the credential note above).

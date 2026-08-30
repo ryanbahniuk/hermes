@@ -40,7 +40,7 @@ export type AgentEvent =
   | { type: "error"; message: string };
 
 export interface AgentRuntime {
-  readonly kind: "claude" | "hermes";
+  readonly kind: "claude" | "tack";
   run(task: AgentTask): AsyncIterable<AgentEvent>;
   // resume(taskId): AsyncIterable<AgentEvent>; // added in build step 4
 }

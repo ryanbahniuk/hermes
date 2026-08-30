@@ -15,9 +15,9 @@ import { mantleApi, mantleFetch } from "./mantle";
 /**
  * Verification actually invokes each discovered model with a minimal request to
  * prove the authenticated AWS profile can use it — native models via the Bedrock
- * Converse API (the same path Hermes' runtimes take), Mantle models via a signed
+ * Converse API (the same path Tack' runtimes take), Mantle models via a signed
  * POST to their gateway route. These are real, billable inference calls, so this
- * only runs when the user opts in with `hermes model discover --verify`.
+ * only runs when the user opts in with `tack model discover --verify`.
  */
 
 export interface VerifyOptions extends DiscoverOptions {

@@ -1,13 +1,13 @@
 {
-  "name": "hermes",
+  "name": "tack",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "bin": {
-    "hermes": "./bin/hermes.ts"
+    "tack": "./bin/tack.ts"
   },
   "scripts": {
-    "hermes": "bun run ./bin/hermes.ts",
+    "tack": "bun run ./bin/tack.ts",
     "build": "bun run ./scripts/build.ts",
     "typecheck": "tsc --noEmit"
   },

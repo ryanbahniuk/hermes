@@ -1,4 +1,4 @@
-import type { HermesConfig, Model, Pricing } from "../config/schema";
+import type { TackConfig, Model, Pricing } from "../config/schema";
 import { resolveAwsProfile, type ResolvedAwsProfile } from "./aws";
 
 export type ResolvedTarget =
@@ -9,7 +9,7 @@ export interface ResolvedModel {
   name: string;
   version: string;
   provider: string;
-  runtime: "claude" | "hermes";
+  runtime: "claude" | "tack";
   backend: "bedrock" | "anthropic";
   target: ResolvedTarget;
   /** The AWS identity a bedrock model authenticates through (undefined = default chain). */
@@ -17,7 +17,7 @@ export interface ResolvedModel {
   pricing?: Pricing;
 }
 
-function toResolved(m: Model, config: HermesConfig): ResolvedModel {
+function toResolved(m: Model, config: TackConfig): ResolvedModel {
   const target: ResolvedTarget =
     m.backend === "anthropic"
       ? { kind: "anthropic", apiModelId: m.apiModelId! }
@@ -40,7 +40,7 @@ function toResolved(m: Model, config: HermesConfig): ResolvedModel {
  * `backendOverride` picks a specific backend when a model is registered twice.
  */
 export function resolveModel(
-  config: HermesConfig,
+  config: TackConfig,
   ref: string,
   backendOverride?: "bedrock" | "anthropic",
 ): ResolvedModel {

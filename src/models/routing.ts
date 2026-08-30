@@ -1,4 +1,4 @@
-import type { HermesConfig, ModelRoles } from "../config/schema";
+import type { TackConfig, ModelRoles } from "../config/schema";
 
 /** The roles a model can be selected for. */
 export type ModelRole = "planner" | "implementer" | "summary";
@@ -21,7 +21,7 @@ const ROLE_KEY: Record<ModelRole, keyof ModelRoles> = {
  * slots into the one marked spot below; nothing else needs to change.
  */
 export function effectiveModelRef(
-  config: HermesConfig,
+  config: TackConfig,
   role: ModelRole,
 ): string | undefined {
   const key = ROLE_KEY[role];

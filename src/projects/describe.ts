@@ -5,7 +5,7 @@ import { createChatModel } from "../models/chat";
 import { resolveModel } from "../models/registry";
 import { effectiveModelRef } from "../models/routing";
 import { expandHome } from "../paths";
-import type { HermesConfig } from "../config/schema";
+import type { TackConfig } from "../config/schema";
 
 /** Docs we read to summarize a repo, in priority order. */
 const DOC_FILES = ["README.md", "CLAUDE.md"];
@@ -56,7 +56,7 @@ function contentToText(content: unknown): string {
  * message when the model isn't configured or there's nothing to summarize.
  */
 export async function generateProjectDescription(
-  config: HermesConfig,
+  config: TackConfig,
   repoPath: string,
 ): Promise<string> {
   const ref = effectiveModelRef(config, "summary");

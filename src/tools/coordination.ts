@@ -9,8 +9,8 @@ const PROPOSE_DESC =
   "Propose an amendment to the shared context when you believe the contract is wrong or incomplete. " +
   "Use sparingly — the planner is authoritative; conform to the current contract unless told otherwise.";
 
-/** LangChain coordination tools for the `hermes` runtime. */
-export function createHermesCoordinationTools(c: Coordination) {
+/** LangChain coordination tools for the `tack` runtime. */
+export function createTackCoordinationTools(c: Coordination) {
   const read = tool(() => c.readSharedContext(), {
     name: "read_shared_context",
     description: READ_DESC,
@@ -27,7 +27,7 @@ export function createHermesCoordinationTools(c: Coordination) {
 /** In-process SDK MCP server exposing the same coordination tools to the `claude` runtime. */
 export function createClaudeCoordinationServer(c: Coordination) {
   return createSdkMcpServer({
-    name: "hermes",
+    name: "tack",
     version: "1.0.0",
     tools: [
       sdkTool("read_shared_context", READ_DESC, {}, async () => ({

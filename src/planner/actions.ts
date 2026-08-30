@@ -1,4 +1,4 @@
-import type { HermesConfig } from "../config/schema";
+import type { TackConfig } from "../config/schema";
 import { resolveModel } from "../models/registry";
 import { effectiveModelRef } from "../models/routing";
 import {
@@ -47,7 +47,7 @@ export interface PlannerActions {
  * are the only public way to kick off work.
  */
 export function createPlannerActions(
-  config: HermesConfig,
+  config: TackConfig,
   sessionId: string,
   plannerRef: string,
 ): PlannerActions {
@@ -103,7 +103,7 @@ export function createPlannerActions(
       return (
         `Dispatched run ${run.id} (${note}). ` +
         `Workers are running in the background; call check_runs to follow progress, ` +
-        `or the user can inspect with \`hermes run logs ${run.id} -f\` and \`hermes run show ${run.id}\`.`
+        `or the user can inspect with \`tack run logs ${run.id} -f\` and \`tack run show ${run.id}\`.`
       );
     },
 

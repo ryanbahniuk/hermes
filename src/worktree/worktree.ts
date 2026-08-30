@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { HERMES_HOME } from "../paths";
+import { TACK_HOME } from "../paths";
 
 export interface Worktree {
   repo: string;
@@ -18,7 +18,7 @@ function git(args: string[], cwd: string): string {
 }
 
 export function worktreesRoot(runId: string): string {
-  return join(HERMES_HOME, "worktrees", runId);
+  return join(TACK_HOME, "worktrees", runId);
 }
 
 /**
@@ -32,13 +32,13 @@ function assertRepoRoot(repo: string): void {
   }
 }
 
-/** Creates a fresh git worktree on a new `hermes/<run>/<project>` branch off HEAD. */
+/** Creates a fresh git worktree on a new `tack/<run>/<project>` branch off HEAD. */
 export function createWorktree(repo: string, runId: string, projectName: string): Worktree {
   assertRepoRoot(repo);
   const root = worktreesRoot(runId);
   mkdirSync(root, { recursive: true });
   const path = join(root, projectName);
-  const branch = `hermes/${runId}/${projectName}`;
+  const branch = `tack/${runId}/${projectName}`;
   git(["worktree", "add", "-b", branch, path, "HEAD"], repo);
   return { repo, path, branch };
 }
@@ -47,7 +47,7 @@ export function createWorktree(repo: string, runId: string, projectName: string)
 export function ensureWorktree(repo: string, runId: string, projectName: string): Worktree {
   const path = join(worktreesRoot(runId), projectName);
   if (existsSync(path)) {
-    return { repo, path, branch: `hermes/${runId}/${projectName}` };
+    return { repo, path, branch: `tack/${runId}/${projectName}` };
   }
   return createWorktree(repo, runId, projectName);
 }

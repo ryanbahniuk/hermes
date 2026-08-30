@@ -1,7 +1,7 @@
 import { discoverModels, type DiscoverOptions, type DiscoveredModel } from "./discover";
 
 /**
- * Bridges `hermes model discover` to `hermes model add`: given the friendly
+ * Bridges `tack model discover` to `tack model add`: given the friendly
  * `name`/`version` a config entry will carry (and optionally a provider or an
  * exact Bedrock model id), it runs discovery and resolves the invocation target
  * automatically — so a user never has to know or paste an inference-profile ARN.
@@ -77,7 +77,7 @@ export async function resolveBinding(opts: ResolveOptions): Promise<ResolvedBind
     if (candidates.length === 0) {
       throw new Error(
         `No Bedrock model with id "${opts.modelId}" is visible to this identity. ` +
-          `Run \`hermes model discover\` to see the available ids.`,
+          `Run \`tack model discover\` to see the available ids.`,
       );
     }
   } else {
@@ -91,7 +91,7 @@ export async function resolveBinding(opts: ResolveOptions): Promise<ResolvedBind
       throw new Error(
         `No Bedrock model matched name "${opts.name}" version "${opts.version}"` +
           (opts.provider ? ` for provider "${opts.provider}"` : "") +
-          `. Run \`hermes model discover\` and pass --model-id <id> (or --inference-profile <arn>).`,
+          `. Run \`tack model discover\` and pass --model-id <id> (or --inference-profile <arn>).`,
       );
     }
     if (candidates.length > 1) {

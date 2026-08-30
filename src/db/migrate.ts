@@ -76,7 +76,7 @@ const migrations: Migration[] = [
         title          TEXT,
         planner_model  TEXT,
         runtime        TEXT,
-        resume_ref     TEXT,          -- claude SDK session id (null for hermes)
+        resume_ref     TEXT,          -- claude SDK session id (null for tack)
         status         TEXT NOT NULL, -- active | closed
         cost           REAL NOT NULL DEFAULT 0,
         created_at     TEXT NOT NULL,

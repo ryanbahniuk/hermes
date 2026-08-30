@@ -57,10 +57,10 @@ function action<C>(fn: (ctx: C) => unknown | Promise<unknown>) {
 }
 
 const init = defineCommand({
-  meta: { name: "init", description: "Create the Hermes home dir + starter config" },
+  meta: { name: "init", description: "Create the Tack home dir + starter config" },
   run: action(() => {
     const r = initHome();
-    console.log(pc.green(`Hermes home: ${r.home}`));
+    console.log(pc.green(`Tack home: ${r.home}`));
     console.log(
       r.createdConfig
         ? pc.dim(`  wrote starter config -> ${r.configPath}`)
@@ -98,7 +98,7 @@ const sessionList = defineCommand({
   run: action(() => {
     db();
     const rows = listSessions();
-    if (rows.length === 0) return void console.log(pc.dim("No sessions yet. Start one with `hermes session start`."));
+    if (rows.length === 0) return void console.log(pc.dim("No sessions yet. Start one with `tack session start`."));
     for (const s of rows) {
       const live = s.status === "active" ? pc.green("active") : pc.dim("closed");
       const cost = sessionTotalCost(s.id);
@@ -255,7 +255,7 @@ function showSession(sessionId: string): void {
       );
     }
   }
-  console.log(pc.dim(`\n  inspect a run: hermes run show <run>`));
+  console.log(pc.dim(`\n  inspect a run: tack run show <run>`));
 }
 
 const runShow = defineCommand({
@@ -298,7 +298,7 @@ const runRetry = defineCommand({
     const pid = spawnSupervisor(r.id);
     setSupervisorPid(r.id, pid);
     console.log(pc.green(`Retrying ${pc.bold(r.id)}`) + pc.dim(`  (supervisor pid ${pid})`));
-    console.log(pc.dim(`  hermes run logs ${r.id} -f`));
+    console.log(pc.dim(`  tack run logs ${r.id} -f`));
   }),
 });
 
@@ -372,7 +372,7 @@ function definePointerCommand(opts: {
       }
 
       if (!args.model) {
-        throw new Error(`A model is required. Usage: hermes model ${opts.name} ${role} <name[@version]>`);
+        throw new Error(`A model is required. Usage: tack model ${opts.name} ${role} <name[@version]>`);
       }
       const ref = String(args.model);
       const config = await loadConfig();
@@ -431,7 +431,7 @@ const modelAdd = defineCommand({
     },
     "model-id": {
       type: "string",
-      description: "Exact Bedrock model id to bind (as shown by `hermes model discover`)",
+      description: "Exact Bedrock model id to bind (as shown by `tack model discover`)",
     },
     "inference-profile": {
       type: "string",
@@ -441,13 +441,13 @@ const modelAdd = defineCommand({
       type: "string",
       description: "Use the first-party Anthropic API backend with this model id (no Bedrock; needs ANTHROPIC_API_KEY)",
     },
-    "input-price": { type: "string", description: "Pricing: USD per 1M input tokens (hermes runtime)" },
-    "output-price": { type: "string", description: "Pricing: USD per 1M output tokens (hermes runtime)" },
+    "input-price": { type: "string", description: "Pricing: USD per 1M input tokens (tack runtime)" },
+    "output-price": { type: "string", description: "Pricing: USD per 1M output tokens (tack runtime)" },
     region: { type: "string", description: "AWS region for discovery (defaults to the aws profile's region, AWS_REGION, or us-east-1)" },
     profile: { type: "string", description: "Low-level AWS named profile for discovery (prefer --aws-profile)" },
     "aws-profile": {
       type: "string",
-      description: "Config aws-profile key (from `hermes aws list`) this model authenticates through — sets discovery creds/region and tags the entry",
+      description: "Config aws-profile key (from `tack aws list`) this model authenticates through — sets discovery creds/region and tags the entry",
     },
   },
   run: action(async ({ args }: { args: Record<string, unknown> }) => {
@@ -464,7 +464,7 @@ const modelAdd = defineCommand({
       awsProfile = resolveAwsProfile(config.aws, awsProfileKey);
       if (!awsProfile) {
         throw new Error(
-          `Unknown aws profile "${awsProfileKey}". Add it with \`hermes aws add\` (see \`hermes aws list\`).`,
+          `Unknown aws profile "${awsProfileKey}". Add it with \`tack aws add\` (see \`tack aws list\`).`,
         );
       }
     }
@@ -549,14 +549,14 @@ const modelAdd = defineCommand({
     // Re-load so a config that no longer parses surfaces immediately.
     await loadConfig();
 
-    const runtime = added.runtime ?? (added.provider === "anthropic" ? "claude" : "hermes");
+    const runtime = added.runtime ?? (added.provider === "anthropic" ? "claude" : "tack");
     console.log(pc.green(`Added model ${pc.bold(`${added.name}@${added.version}`)}`) + pc.dim(`  ${added.provider}`));
     const target = added.backend === "anthropic" ? added.apiModelId : added.inferenceProfile;
     console.log(pc.dim(`  ${target ?? ""}`));
-    if (runtime === "hermes" && !added.pricing) {
+    if (runtime === "tack" && !added.pricing) {
       console.log(
         pc.yellow(
-          "  note: no pricing set — cost won't be computed for this hermes-runtime model. " +
+          "  note: no pricing set — cost won't be computed for this tack-runtime model. " +
             "Re-add with --input-price/--output-price.",
         ),
       );
@@ -646,7 +646,7 @@ const modelDiscover = defineCommand({
     region: { type: "string", description: "AWS region (defaults to AWS_REGION or us-east-1)" },
     "aws-profile": {
       type: "string",
-      description: "Config aws-profile key (from `hermes aws list`) to explore — sets creds + region from it",
+      description: "Config aws-profile key (from `tack aws list`) to explore — sets creds + region from it",
     },
     "profile-prefix": {
       type: "string",
@@ -749,7 +749,7 @@ const modelDiscover = defineCommand({
       : " Add --verify to confirm which actually work for this profile.";
     console.log(
       pc.dim(
-        `\n${ready} ready to use.${verifyNote} Add one with \`hermes model add <name> <version> --model-id <id>\`` +
+        `\n${ready} ready to use.${verifyNote} Add one with \`tack model add <name> <version> --model-id <id>\`` +
           ` — the inference profile is resolved for you. Mantle entries are gateway-only (DISCOVERED_NOT_VALIDATED).`,
       ),
     );
@@ -777,7 +777,7 @@ const awsList = defineCommand({
     const keys = Object.keys(config.aws.profiles);
     if (keys.length === 0) {
       return void console.log(
-        pc.dim("No AWS profiles configured. Add one with `hermes aws add <key> --profile <name>`."),
+        pc.dim("No AWS profiles configured. Add one with `tack aws add <key> --profile <name>`."),
       );
     }
     for (const key of keys) {
@@ -853,7 +853,7 @@ const awsAdd = defineCommand({
     console.log(pc.dim(`  profile: ${profileName}   account: ${account ?? "(unset)"}   region: ${region ?? "(env/us-east-1)"}`));
     console.log(pc.dim(`  ${CONFIG_PATH}`));
     if (!account) {
-      console.log(pc.yellow("  note: no account set — hermes can't verify this profile points at the right account. Re-run with --login or --account."));
+      console.log(pc.yellow("  note: no account set — tack can't verify this profile points at the right account. Re-run with --login or --account."));
     }
   }),
 });
@@ -881,7 +881,7 @@ const awsSetDefault = defineCommand({
       console.log(pc.green("Cleared default aws profile"));
       return void console.log(pc.dim(`  ${CONFIG_PATH}`));
     }
-    if (!args.key) throw new Error("A profile key is required. Usage: hermes aws set-default <key> (or --clear).");
+    if (!args.key) throw new Error("A profile key is required. Usage: tack aws set-default <key> (or --clear).");
     await setDefaultAwsProfile(String(args.key));
     await loadConfig();
     console.log(pc.green(`Set default aws profile → ${pc.bold(String(args.key))}`));
@@ -896,7 +896,7 @@ const awsLogin = defineCommand({
     const config = await loadConfig();
     const keys = args.key ? [String(args.key)] : Object.keys(config.aws.profiles);
     if (keys.length === 0) {
-      return void console.log(pc.dim("No AWS profiles configured. Add one with `hermes aws add`."));
+      return void console.log(pc.dim("No AWS profiles configured. Add one with `tack aws add`."));
     }
     for (const key of keys) {
       const resolved = resolveAwsProfile(config.aws, key);
@@ -914,7 +914,7 @@ const awsWhoami = defineCommand({
     const config = await loadConfig();
     const keys = args.key ? [String(args.key)] : Object.keys(config.aws.profiles);
     if (keys.length === 0) {
-      return void console.log(pc.dim("No AWS profiles configured. Add one with `hermes aws add`."));
+      return void console.log(pc.dim("No AWS profiles configured. Add one with `tack aws add`."));
     }
     let failed = false;
     for (const key of keys) {
@@ -951,7 +951,7 @@ const project = defineCommand({
 });
 
 // Internal: the detached per-run supervisor entrypoint. `spawnSupervisor`
-// re-invokes this program as `hermes __supervise <runId>` so a single (possibly
+// re-invokes this program as `tack __supervise <runId>` so a single (possibly
 // compiled) binary serves both the CLI and the background supervisor.
 const superviseCmd = defineCommand({
   meta: { name: "__supervise", description: "(internal) run a run's supervisor", hidden: true },
@@ -992,12 +992,12 @@ const subCommands = {
 };
 
 const main = defineCommand({
-  meta: { name: "hermes", description: "Personal local development harness" },
+  meta: { name: "tack", description: "Personal local development harness" },
   subCommands,
 });
 
-// The primary interface is the planning session: a bare `hermes` (or one with
-// only leading flags, e.g. `hermes --resume <id>`) starts one. We inject
+// The primary interface is the planning session: a bare `tack` (or one with
+// only leading flags, e.g. `tack --resume <id>`) starts one. We inject
 // `session start` rather than using citty's parent `run`, because citty always
 // runs a command's `run` *in addition to* any matched subcommand.
 const rawArgs = process.argv.slice(2);

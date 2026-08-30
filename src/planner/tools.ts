@@ -2,7 +2,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { createSdkMcpServer, tool as sdkTool } from "@anthropic-ai/claude-agent-sdk";
-import type { HermesConfig } from "../config/schema";
+import type { TackConfig } from "../config/schema";
 import { assertReadable, opRead, opSearch, type Scoping } from "../tools/ops";
 import type { PlannerActions } from "./actions";
 
@@ -43,7 +43,7 @@ const delegateSchema = {
  * A read-only filesystem boundary spanning every configured project root plus
  * the read allowlist. There is no writable worktree — the planner never edits.
  */
-export function plannerScoping(config: HermesConfig): Scoping {
+export function plannerScoping(config: TackConfig): Scoping {
   const roots = [...config.projects.map((p) => p.path), ...config.readAllowlist];
   return { worktree: roots[0] ?? process.cwd(), readAllowlist: roots };
 }
@@ -65,8 +65,8 @@ function listDir(scoping: Scoping, path: string): string {
   );
 }
 
-/** LangChain planner tools for the `hermes` runtime. */
-export function createHermesPlannerTools(actions: PlannerActions, scoping: Scoping) {
+/** LangChain planner tools for the `tack` runtime. */
+export function createTackPlannerTools(actions: PlannerActions, scoping: Scoping) {
   return [
     tool(() => actions.listProjects(), {
       name: "list_projects",
@@ -104,11 +104,11 @@ export function createHermesPlannerTools(actions: PlannerActions, scoping: Scopi
 /**
  * In-process SDK MCP server exposing the planner delegation tools to the `claude`
  * runtime. Read-only exploration uses the SDK's native Read/Grep/Glob/LS (scoped
- * by a PreToolUse hook in the runtime), so only the Hermes-specific tools live here.
+ * by a PreToolUse hook in the runtime), so only the Tack-specific tools live here.
  */
 export function createClaudePlannerServer(actions: PlannerActions) {
   return createSdkMcpServer({
-    name: "hermes_planner",
+    name: "tack_planner",
     version: "1.0.0",
     tools: [
       sdkTool("list_projects", LIST_PROJECTS_DESC, {}, async () => ({
