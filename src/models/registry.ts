@@ -1,4 +1,5 @@
 import type { HermesConfig, Model, Pricing } from "../config/schema";
+import { resolveAwsProfile, type ResolvedAwsProfile } from "./aws";
 
 export type ResolvedTarget =
   | { kind: "bedrock"; inferenceProfile: string }
@@ -11,10 +12,12 @@ export interface ResolvedModel {
   runtime: "claude" | "hermes";
   backend: "bedrock" | "anthropic";
   target: ResolvedTarget;
+  /** The AWS identity a bedrock model authenticates through (undefined = default chain). */
+  aws?: ResolvedAwsProfile;
   pricing?: Pricing;
 }
 
-function toResolved(m: Model): ResolvedModel {
+function toResolved(m: Model, config: HermesConfig): ResolvedModel {
   const target: ResolvedTarget =
     m.backend === "anthropic"
       ? { kind: "anthropic", apiModelId: m.apiModelId! }
@@ -26,6 +29,8 @@ function toResolved(m: Model): ResolvedModel {
     runtime: m.runtime,
     backend: m.backend,
     target,
+    // Only a bedrock model authenticates against AWS; the anthropic backend uses an API key.
+    aws: m.backend === "bedrock" ? resolveAwsProfile(config.aws, m.awsProfile) : undefined,
     pricing: m.pricing,
   };
 }
@@ -56,5 +61,5 @@ export function resolveModel(
     }
     model = match;
   }
-  return toResolved(model);
+  return toResolved(model, config);
 }

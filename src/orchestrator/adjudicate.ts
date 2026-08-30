@@ -1,7 +1,6 @@
 import { z } from "zod";
-import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { defaultRegion } from "../models/chat";
+import { createChatModel } from "../models/chat";
 import type { ResolvedModel } from "../models/registry";
 
 const VerdictSchema = z.object({
@@ -38,8 +37,10 @@ export async function adjudicate(
   if (model.target.kind !== "bedrock") {
     throw new Error(`the adjudicator currently requires a bedrock-backed model (got ${model.target.kind})`);
   }
-  const llm = new ChatBedrockConverse({ model: model.target.inferenceProfile, region: defaultRegion() });
-  const structured = llm.withStructuredOutput(VerdictSchema, { name: "adjudicate_amendment" });
+  // createChatModel binds the adjudicator's aws profile creds + region (its account).
+  const structured = createChatModel(model).withStructuredOutput(VerdictSchema, {
+    name: "adjudicate_amendment",
+  });
 
   return structured.invoke([
     new SystemMessage(SYSTEM),

@@ -3,6 +3,35 @@ import { z } from "zod";
 export const RuntimeKind = z.enum(["claude", "hermes"]);
 export const BackendKind = z.enum(["bedrock", "anthropic"]);
 
+/**
+ * A named AWS identity a Bedrock model authenticates through. `profile` is the
+ * shared-config profile name passed to the SDK / `aws sso login`; `account` (a
+ * 12-digit id) is asserted against `sts:GetCallerIdentity` so a wrong or expired
+ * profile fails loudly instead of silently hitting another account; `region`
+ * pins where the model's inference profile lives. A model points at one of these
+ * by the key it's registered under (see `Model.awsProfile`), which lets different
+ * models live in different accounts/regions.
+ */
+export const AwsProfileSchema = z.object({
+  profile: z.string().min(1),
+  account: z
+    .string()
+    .regex(/^\d{12}$/, "account must be a 12-digit AWS account id")
+    .optional(),
+  region: z.string().min(1).optional(),
+});
+export type AwsProfile = z.infer<typeof AwsProfileSchema>;
+
+/** The `aws` config block: named profiles plus the fallback used when a model has none. */
+export const AwsConfigSchema = z
+  .object({
+    profiles: z.record(z.string(), AwsProfileSchema).default({}),
+    /** Key of the profile to use when a model doesn't name its own. */
+    default: z.string().optional(),
+  })
+  .default({ profiles: {} });
+export type AwsConfig = z.infer<typeof AwsConfigSchema>;
+
 export const ProjectSchema = z.object({
   name: z.string().min(1),
   path: z.string().min(1),
@@ -30,6 +59,8 @@ export const ModelInputSchema = z.object({
   backend: BackendKind.optional(),
   inferenceProfile: z.string().optional(),
   apiModelId: z.string().optional(),
+  /** Key into `aws.profiles` — the account/region/profile this model authenticates through. */
+  awsProfile: z.string().optional(),
   pricing: PricingSchema.optional(),
 });
 export type ModelInput = z.infer<typeof ModelInputSchema>;
@@ -43,6 +74,8 @@ export interface Model {
   backend: "bedrock" | "anthropic";
   inferenceProfile?: string;
   apiModelId?: string;
+  /** Key into `aws.profiles`; only meaningful for a bedrock backend. */
+  awsProfile?: string;
   pricing?: Pricing;
 }
 
@@ -72,6 +105,9 @@ export function normalizeModel(m: ModelInput): Model {
   if (runtime === "hermes" && backend !== "bedrock") {
     throw new Error(`runtime "hermes" requires backend "bedrock" (${where})`);
   }
+  if (m.awsProfile && backend !== "bedrock") {
+    throw new Error(`"awsProfile" only applies to a bedrock backend (${where})`);
+  }
 
   return {
     name: m.name,
@@ -81,6 +117,7 @@ export function normalizeModel(m: ModelInput): Model {
     backend,
     inferenceProfile: m.inferenceProfile,
     apiModelId: m.apiModelId,
+    awsProfile: m.awsProfile,
     pricing: m.pricing,
   };
 }
@@ -105,6 +142,8 @@ export type ModelRoles = z.infer<typeof ModelRolesSchema>;
 export const ConfigSchema = z.object({
   projects: z.array(ProjectSchema).default([]),
   models: z.array(ModelInputSchema).default([]),
+  // Named AWS identities models authenticate through (account + region + profile).
+  aws: AwsConfigSchema,
   readAllowlist: z.array(z.string()).default([]),
   defaults: ModelRolesSchema,
   // Hard pins that take precedence over intelligent routing (and defaults).
@@ -118,6 +157,7 @@ export type HermesConfigInput = z.input<typeof ConfigSchema>;
 export interface HermesConfig {
   projects: Project[];
   models: Model[];
+  aws: AwsConfig;
   readAllowlist: string[];
   defaults: ModelRoles;
   overrides: ModelRoles;

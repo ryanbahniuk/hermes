@@ -1,4 +1,5 @@
 import { loadConfig } from "../config/load";
+import { ensureAuth } from "../models/aws";
 import { resolveModel, type ResolvedModel } from "../models/registry";
 import { effectiveModelRef } from "../models/routing";
 import {
@@ -54,6 +55,11 @@ export async function supervise(runId: string): Promise<void> {
       if (!plannerRef) throw new Error(`no planner model configured`);
       const plannerModel = resolveModel(config, plannerRef);
 
+      // Confirm the planner's AWS profile is authenticated and on the expected
+      // account before spending. No TTY here (detached supervisor), so no auto-
+      // login — a stale session fails with a `hermes aws login` hint.
+      if (plannerModel.aws) await ensureAuth(plannerModel.aws);
+
       appendLog(runLog, `planning with ${plannerRef}…`);
       const { selections, sharedContext } = await plan(config, plannerModel, run.problem);
 
@@ -65,6 +71,10 @@ export async function supervise(runId: string): Promise<void> {
       const implRef = effectiveModelRef(config, "implementer") ?? plannerRef;
       const implModel = resolveModel(config, implRef);
       const implLabel = `${implModel.name}@${implModel.version}`;
+
+      // Same preflight for the implementer's profile — it may be a different
+      // account than the planner's. Fail before creating tasks we can't run.
+      if (implModel.aws) await ensureAuth(implModel.aws);
 
       for (const s of selections) {
         createTask({

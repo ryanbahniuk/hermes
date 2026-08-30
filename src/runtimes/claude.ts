@@ -53,11 +53,23 @@ function scopeViolation(scoping: Scoping, toolName: string, toolInput: unknown):
 export function bedrockEnvForModel(model: ResolvedModel): Record<string, string> {
   const base = process.env as Record<string, string>;
   if (model.target.kind === "bedrock") {
-    return {
+    // The SDK subprocess resolves creds/region from the environment, so pin both to
+    // the model's configured aws profile — this is what lets different models reach
+    // different accounts. Env vars win over an ambient AWS_PROFILE the user exported.
+    const env: Record<string, string> = {
       ...base,
       CLAUDE_CODE_USE_BEDROCK: "1",
-      AWS_REGION: base.AWS_REGION ?? base.AWS_DEFAULT_REGION ?? defaultRegion(),
+      AWS_REGION: model.aws?.region ?? base.AWS_REGION ?? base.AWS_DEFAULT_REGION ?? defaultRegion(),
     };
+    if (model.aws?.profile) {
+      env.AWS_PROFILE = model.aws.profile;
+      // Static env creds outrank AWS_PROFILE in the SDK chain, which would defeat
+      // per-model account pinning — drop them so the profile is authoritative.
+      delete env.AWS_ACCESS_KEY_ID;
+      delete env.AWS_SECRET_ACCESS_KEY;
+      delete env.AWS_SESSION_TOKEN;
+    }
+    return env;
   }
   // first-party Anthropic API backend
   if (!base.ANTHROPIC_API_KEY) {

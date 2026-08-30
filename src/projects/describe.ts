@@ -1,8 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { defaultRegion } from "../models/chat";
+import { createChatModel } from "../models/chat";
 import { resolveModel } from "../models/registry";
 import { effectiveModelRef } from "../models/routing";
 import { expandHome } from "../paths";
@@ -83,10 +82,7 @@ export async function generateProjectDescription(
     );
   }
 
-  const llm = new ChatBedrockConverse({
-    model: model.target.inferenceProfile,
-    region: defaultRegion(),
-  });
+  const llm = createChatModel(model);
   const res = await llm.invoke([
     new SystemMessage(SYSTEM),
     new HumanMessage(`Repository docs:\n\n${docs}`),

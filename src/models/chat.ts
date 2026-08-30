@@ -1,4 +1,5 @@
 import { ChatBedrockConverse } from "@langchain/aws";
+import { credentialsFor, regionFor } from "./aws";
 import type { ResolvedModel } from "./registry";
 
 export function defaultRegion(): string {
@@ -7,7 +8,8 @@ export function defaultRegion(): string {
 
 /**
  * Builds a LangChain chat model for the `hermes` runtime via the Bedrock Converse
- * API. Credentials come from the default AWS provider chain (SSO profiles, env, …).
+ * API. Credentials and region come from the model's configured aws profile (its
+ * account/region), falling back to the default provider chain when unbound.
  */
 export function createChatModel(model: ResolvedModel) {
   if (model.target.kind !== "bedrock") {
@@ -17,6 +19,7 @@ export function createChatModel(model: ResolvedModel) {
   }
   return new ChatBedrockConverse({
     model: model.target.inferenceProfile,
-    region: defaultRegion(),
+    region: regionFor(model.aws),
+    credentials: credentialsFor(model.aws),
   });
 }

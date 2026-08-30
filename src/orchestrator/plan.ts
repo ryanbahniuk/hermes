@@ -1,7 +1,6 @@
 import { z } from "zod";
-import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { defaultRegion } from "../models/chat";
+import { createChatModel } from "../models/chat";
 import type { HermesConfig } from "../config/schema";
 import type { ResolvedModel } from "../models/registry";
 
@@ -55,11 +54,10 @@ export async function plan(
   }
   if (config.projects.length === 0) return { sharedContext: "", selections: [] };
 
-  const llm = new ChatBedrockConverse({
-    model: plannerModel.target.inferenceProfile,
-    region: defaultRegion(),
+  // createChatModel binds the planner's aws profile creds + region (its account).
+  const structured = createChatModel(plannerModel).withStructuredOutput(PlanSchema, {
+    name: "select_projects",
   });
-  const structured = llm.withStructuredOutput(PlanSchema, { name: "select_projects" });
 
   const projectList = config.projects.map((p) => `- ${p.name}: ${p.description}`).join("\n");
   const result = await structured.invoke([

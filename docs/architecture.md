@@ -79,7 +79,7 @@ true any-model support.
   `ClaudeRuntime` and `HermesRuntime` (LangGraph). Selected per task by model.
 - **Shared context** — a versioned, run-level artifact (the agreed contract / cross-project
   interface). Authored by the planner, read by every implementer, enforced at reconcile.
-- **Model registry** — `{ name, version, provider, runtime, inferenceProfile }` entries.
+- **Model registry** — `{ name, version, provider, runtime, inferenceProfile, awsProfile? }` entries.
 
 ---
 
@@ -377,19 +377,35 @@ runs.session_id  text       -- nullable; links a delegated swarm back to its ses
     ⇒ `bedrock` only.
   - **target id** (depends on backend): `inferenceProfile` for `bedrock`, `apiModelId`
     (e.g. `claude-sonnet-4-5`) for `anthropic`.
-- The supervisor resolves a task's model → registry entry → runtime + backend + target.
+  - `awsProfile` (bedrock only) — key into the top-level `aws.profiles` map naming the AWS
+    identity this model authenticates through; falls back to `aws.default`.
+- The supervisor resolves a task's model → registry entry → runtime + backend + target +
+  resolved aws profile (`{ profile, account?, region? }`).
 - **Selection:** register two entries to expose both paths for one model, or override per run
   with `--backend <bedrock|anthropic>`.
-- **Credentials:** `bedrock` → default AWS credential chain (SSO profiles expected);
-  `anthropic` → `ANTHROPIC_API_KEY` **from the environment, never stored in the config file**.
+- **AWS profiles (`aws.profiles` + `aws.default`):** named identities, each `{ profile,
+  account?, region? }`. A bedrock model's `awsProfile` selects one; both credential paths (JS
+  SDK and the Claude SDK subprocess) are pinned to it, so **different models can run in
+  different accounts/regions**. Before use, `ensureAuth` calls `sts:GetCallerIdentity` through
+  the JS SDK path and asserts the resolved account equals `account` — a mismatch stops loudly
+  instead of misrouting. Interactive entry points (`hermes session start`, `hermes aws login`,
+  `hermes model add --aws-profile`) drive `aws sso login` on an expired session; the detached
+  supervisor re-verifies non-interactively and fails with a `hermes aws login <key>` hint.
+  Managed via `hermes aws {list,add,remove,set-default,login,whoami}`. With no profiles
+  configured, models fall back to the default AWS provider chain (pre-config behavior).
+- **Credentials:** `bedrock` → the model's aws profile, else the default AWS credential chain
+  (SSO profiles expected); `anthropic` → `ANTHROPIC_API_KEY` **from the environment, never
+  stored in the config file**.
 
 > **Operational note (two credential paths):** the `claude` runtime resolves AWS creds via
-> the Claude Agent SDK's bundled CLI, while the `hermes` runtime **and the planner** resolve
-> creds via `@langchain/aws` → the in-process JS AWS SDK default chain. These can differ:
-> an environment where the CLI works (e.g. SSO the CLI understands) may still fail the JS
-> chain with "Could not load credentials from any providers". Ensure creds are resolvable by
-> the JS SDK too (env vars, or `AWS_PROFILE` pointing at an SSO/role profile the JS default
-> chain can load) for the planner and non-Anthropic models to run.
+> the Claude Agent SDK's bundled CLI (Hermes passes it `AWS_PROFILE`/`AWS_REGION` derived from
+> the model's aws profile), while the `hermes` runtime **and the planner** resolve creds via
+> `@langchain/aws` → the in-process JS AWS SDK (pinned to the same profile's credentials).
+> These can differ: an environment where the CLI works (e.g. SSO the CLI understands) may
+> still fail the JS chain with "Could not load credentials from any providers". The account
+> preflight (`ensureAuth`, via `sts:GetCallerIdentity`) runs on the JS SDK path, so it also
+> catches this gap before spend. Ensure creds are resolvable by the JS SDK (the profile's
+> SSO/role creds, or env vars) for the planner and non-Anthropic models to run.
 
 ---
 

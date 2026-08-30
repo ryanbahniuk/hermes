@@ -1,9 +1,12 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { CONFIG_PATH } from "../paths";
 import {
+  AwsProfileSchema,
   ModelInputSchema,
   ProjectSchema,
   normalizeModel,
+  type AwsConfig,
+  type AwsProfile,
   type ModelInput,
   type Project,
 } from "./schema";
@@ -190,6 +193,7 @@ function serializeModel(m: ModelInput): string {
     lines.push(`      inferenceProfile: ${JSON.stringify(m.inferenceProfile)},`);
   }
   if (m.apiModelId) lines.push(`      apiModelId: ${JSON.stringify(m.apiModelId)},`);
+  if (m.awsProfile) lines.push(`      awsProfile: ${JSON.stringify(m.awsProfile)},`);
   if (m.pricing) {
     const parts = Object.entries(m.pricing)
       .filter(([, v]) => v !== undefined)
@@ -371,6 +375,145 @@ export async function setSectionModel(
   const current = await readSection(path, section);
   const next = { ...current, [key]: ref };
   writeSection(path, section, next);
+  return next;
+}
+
+// --- AWS profiles -----------------------------------------------------------
+
+/** Serializes one aws profile as an inline object, omitting unset fields. */
+function serializeAwsProfile(p: AwsProfile): string {
+  const parts = [`profile: ${JSON.stringify(p.profile)}`];
+  if (p.account) parts.push(`account: ${JSON.stringify(p.account)}`);
+  if (p.region) parts.push(`region: ${JSON.stringify(p.region)}`);
+  return `{ ${parts.join(", ")} }`;
+}
+
+/** Serializes the whole `aws` block (profiles map + optional default) as a TS object literal. */
+function serializeAws(aws: AwsConfig): string {
+  const keys = Object.keys(aws.profiles);
+  const profiles =
+    keys.length === 0
+      ? "{}"
+      : `{\n${keys
+          .map((k) => `      ${JSON.stringify(k)}: ${serializeAwsProfile(aws.profiles[k]!)},`)
+          .join("\n")}\n    }`;
+  const lines = [`    profiles: ${profiles},`];
+  if (aws.default) lines.push(`    default: ${JSON.stringify(aws.default)},`);
+  return `{\n${lines.join("\n")}\n  }`;
+}
+
+/** Reads the `aws` block as written in the config (verbatim, before defaults). */
+async function readAws(path: string): Promise<AwsConfig> {
+  const mod = (await import(path)) as { default?: unknown; config?: unknown };
+  const raw = (mod.default ?? mod.config) as { aws?: unknown } | undefined;
+  const aws = raw?.aws ?? { profiles: {} };
+  if (typeof aws !== "object" || aws === null || Array.isArray(aws)) {
+    throw new Error("`aws` in the config is not an object.");
+  }
+  const value = aws as { profiles?: unknown; default?: unknown };
+  if (value.profiles !== undefined && (typeof value.profiles !== "object" || value.profiles === null)) {
+    throw new Error("`aws.profiles` in the config is not an object.");
+  }
+  return {
+    profiles: (value.profiles as Record<string, AwsProfile>) ?? {},
+    default: typeof value.default === "string" ? value.default : undefined,
+  };
+}
+
+/** Rewrites the `aws` block in place, or inserts it before the config's closing brace. */
+function writeAws(path: string, aws: AwsConfig): void {
+  const src = readFileSync(path, "utf8");
+  const serialized = serializeAws(aws);
+  const hasKey = /\baws\s*:/.test(blankNonCode(src));
+  if (hasKey) {
+    const { start, end } = findDelimitedSpan(src, "aws", "{", "}");
+    writeFileSync(path, src.slice(0, start) + serialized + src.slice(end));
+    return;
+  }
+  const { end } = findConfigObjectSpan(src);
+  const close = end - 1; // index of the config object's closing "}"
+  const head = src.slice(0, close);
+  const pad = head.endsWith("\n") ? "" : "\n";
+  writeFileSync(path, `${head}${pad}  aws: ${serialized},\n${src.slice(close)}`);
+}
+
+/**
+ * Adds a named aws profile. Rejects a duplicate key. Becomes the config default
+ * when none is set yet (or when `makeDefault` is passed) — so the first profile a
+ * user adds is used without an extra `set-default` step.
+ */
+export async function addAwsProfileToConfig(
+  key: string,
+  profile: AwsProfile,
+  opts: { makeDefault?: boolean } = {},
+  path = CONFIG_PATH,
+): Promise<{ aws: AwsConfig; isDefault: boolean }> {
+  if (!existsSync(path)) {
+    throw new Error(`No config found at ${path}. Run \`hermes init\` to create one.`);
+  }
+  if (!key.trim()) throw new Error("A profile key is required.");
+  const parsed = AwsProfileSchema.parse(profile);
+  const current = await readAws(path);
+  if (current.profiles[key]) {
+    throw new Error(`An aws profile "${key}" already exists in the config.`);
+  }
+  const makeDefault = opts.makeDefault || !current.default;
+  const next: AwsConfig = {
+    profiles: { ...current.profiles, [key]: parsed },
+    default: makeDefault ? key : current.default,
+  };
+  writeAws(path, next);
+  return { aws: next, isDefault: makeDefault };
+}
+
+/**
+ * Removes a named aws profile. Refuses when a model still references it (which
+ * would make the config fail to load), and clears `aws.default` if it pointed here.
+ */
+export async function removeAwsProfileFromConfig(
+  key: string,
+  path = CONFIG_PATH,
+): Promise<AwsProfile> {
+  if (!existsSync(path)) {
+    throw new Error(`No config found at ${path}. Run \`hermes init\` to create one.`);
+  }
+  const current = await readAws(path);
+  const removed = current.profiles[key];
+  if (!removed) {
+    throw new Error(`No aws profile "${key}" in the config.`);
+  }
+  const models = await readModels(path);
+  const referencing = models.filter((m) => m.awsProfile === key).map(modelRef);
+  if (referencing.length > 0) {
+    throw new Error(
+      `Cannot remove aws profile "${key}" — still used by: ${referencing.join(", ")}. ` +
+        `Repoint or remove those models first.`,
+    );
+  }
+  const profiles = { ...current.profiles };
+  delete profiles[key];
+  writeAws(path, {
+    profiles,
+    default: current.default === key ? undefined : current.default,
+  });
+  return removed;
+}
+
+/** Sets (or clears, with `null`) the default aws profile. Validates the key exists. */
+export async function setDefaultAwsProfile(
+  key: string | null,
+  path = CONFIG_PATH,
+): Promise<AwsConfig> {
+  if (!existsSync(path)) {
+    throw new Error(`No config found at ${path}. Run \`hermes init\` to create one.`);
+  }
+  const current = await readAws(path);
+  if (key !== null && !current.profiles[key]) {
+    const known = Object.keys(current.profiles).join(", ") || "(none)";
+    throw new Error(`No aws profile "${key}" in the config. Defined: ${known}`);
+  }
+  const next: AwsConfig = { profiles: current.profiles, default: key ?? undefined };
+  writeAws(path, next);
   return next;
 }
 

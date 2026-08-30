@@ -81,20 +81,39 @@ both.
    This creates `~/.hermes/` containing `hermes.config.ts` (your config), `hermes.db` (state),
    and `logs/`. Override the location with `HERMES_HOME=/path hermes …`.
 
-2. **Configure AWS credentials.** Hermes uses the default AWS provider chain — export env
-   vars or a profile so **both** credential paths resolve:
+2. **Configure AWS profiles.** Register the account(s)/region(s) your Bedrock models live in
+   as named **aws profiles**, so each model authenticates as its own identity — and Hermes can
+   drive `aws sso login` and verify you're on the expected account for you:
 
    ```bash
-   export AWS_REGION=us-east-1
-   export AWS_PROFILE=your-profile          # or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / …
+   # key            shared-config profile                         account         region
+   hermes aws add coding-tools \
+     --profile coding-tools-aws-coding-tools-bedrock \
+     --region us-east-1 --login          # --login runs `aws sso login`, then fills --account from STS
+   hermes aws list                        # profiles, their accounts/regions, and which models use each
+   hermes aws whoami                      # verify every profile's identity (checks the account matches)
+   hermes aws login [key]                 # sign in to one profile, or all of them
    ```
 
+   Each profile pins a shared-config `profile`, its 12-digit `account` (asserted via
+   `sts:GetCallerIdentity` so a wrong or expired profile fails loudly instead of silently
+   hitting another account), and the `region` its inference profiles live in. A model selects
+   one with `awsProfile: "<key>"`; `hermes aws set-default <key>` sets the fallback for models
+   that don't name one. **Different models can live in different accounts** — a planner in one,
+   an implementer in another — and each is authenticated and account-verified independently.
+   Starting a session preflights every profile it will use (driving `aws sso login` when a
+   session has expired); the background supervisor re-verifies non-interactively and stops with
+   a `hermes aws login <key>` hint rather than misrouting.
+
+   If you configure **no** aws profiles, Hermes falls back to the default AWS provider chain
+   (`AWS_PROFILE` / `AWS_REGION` / env creds) exactly as before — the feature is opt-in.
+
    > **Note — two credential paths.** The `claude` runtime resolves creds via the Claude
-   > Agent SDK's CLI, while the `hermes` runtime **and the planner/adjudicator** resolve creds
-   > via the in-process JS AWS SDK. An environment where only the CLI works (e.g. certain SSO
-   > setups) will fail the planner with *"Could not load credentials"*. Make sure the JS SDK
-   > default chain can load your creds (env vars, or `AWS_PROFILE` pointing at a resolvable
-   > profile).
+   > Agent SDK's CLI (Hermes passes it `AWS_PROFILE`/`AWS_REGION` from the model's aws profile),
+   > while the `hermes` runtime **and the planner/adjudicator** resolve creds via the in-process
+   > JS AWS SDK (pinned to the same profile). An environment where only the CLI works (e.g.
+   > certain SSO setups) will fail the planner with *"Could not load credentials"*. Make sure the
+   > JS SDK default chain can load the profile's creds.
 
 3. **Register your projects and models** in `~/.hermes/hermes.config.ts`. Both
    registries have CLI commands, so you never have to hand-edit the file:
@@ -121,7 +140,10 @@ both.
    the READY application-inference-profile ARN for you and writes the entry.
    Escape hatches: `--inference-profile <arn>` (set the target directly, skip
    discovery) and `--api-model-id <id>` (first-party Anthropic API backend
-   instead of Bedrock). Add `--input-price`/`--output-price` (USD per 1M tokens)
+   instead of Bedrock). Pass `--aws-profile <key>` (a key from `hermes aws list`)
+   to bind the model to a specific account/region — discovery then authenticates
+   as that profile (driving `aws sso login` if needed) and the entry is tagged so
+   it always runs there. Add `--input-price`/`--output-price` (USD per 1M tokens)
    for non-Anthropic models so cost can be computed. Remove one with
    `hermes model remove <name> [version]`.
 
@@ -158,15 +180,26 @@ export default {
     { name: "web", path: "~/code/web", description: "React web frontend." },
   ],
 
+  // Named AWS identities models authenticate through (manage with `hermes aws …`).
+  // Each pins a shared-config profile, its account (verified via STS), and region.
+  aws: {
+    profiles: {
+      "coding-tools": { profile: "coding-tools-aws-coding-tools-bedrock", account: "602028460818", region: "us-east-1" },
+    },
+    default: "coding-tools",             // used by models that don't name their own
+  },
+
   // Models available to the planner and implementers.
-  //   runtime  defaults: provider "anthropic" -> "claude", otherwise -> "hermes".
-  //   backend  defaults to "bedrock".
+  //   runtime     defaults: provider "anthropic" -> "claude", otherwise -> "hermes".
+  //   backend     defaults to "bedrock".
+  //   awsProfile  key into aws.profiles; falls back to aws.default.
   models: [
     {
       name: "claude-sonnet",
       version: "4.5",
       provider: "anthropic",
       inferenceProfile: "us.anthropic.claude-sonnet-4-5-20250929-v1:0", // your real profile id
+      awsProfile: "coding-tools",        // which account/region this model runs in
     },
 
     // First-party Anthropic API instead of Bedrock (needs ANTHROPIC_API_KEY in your env):
@@ -202,7 +235,10 @@ Key fields:
 | `projects[].path` | Must be a **git repository root**. `~` is expanded. |
 | `models[].runtime` | `claude` (Claude Agent SDK) or `hermes` (LangGraph + Bedrock Converse). Inferred from `provider`, overridable. |
 | `models[].backend` | `bedrock` (default) or `anthropic` (first-party API; `claude` runtime + `provider: anthropic` only). |
+| `models[].awsProfile` | Key into `aws.profiles` — the account/region/profile this bedrock model authenticates through. Falls back to `aws.default`. |
 | `models[].pricing` | Optional USD-per-1M-token rates; used to compute cost for the `hermes` runtime. |
+| `aws.profiles` | Named AWS identities (`{ profile, account?, region? }`). `account` is asserted via STS so a wrong/expired profile fails loudly. Manage with `hermes aws …`. |
+| `aws.default` | Profile key used by bedrock models that don't set `awsProfile`. Omit to use the default AWS provider chain. |
 | `readAllowlist` | Directories the read tool may read outside the worktree. (`shell` is trusted and not bounded by this.) |
 
 ## Usage
@@ -260,6 +296,14 @@ hermes model set-default planner <name[@version]>     # fallback planner model
 hermes model set-default implementer <name[@version]> # fallback implementer model
 hermes model set implementer <name[@version]>         # hard pin (overrides routing)
 hermes model set <role> --clear                       # remove an override
+
+# AWS profiles (accounts/regions models authenticate through)
+hermes aws list                          # profiles, accounts/regions, and which models use each
+hermes aws add <key> --profile <name> --region <r> --login   # add one; --login signs in + fills account
+hermes aws login [key]                   # `aws sso login` + verify one profile, or all of them
+hermes aws whoami [key]                  # verify identity/account without logging in
+hermes aws set-default <key>             # profile for models that don't name one (--clear to unset)
+hermes aws remove <key>                  # unregister a profile (refused while a model uses it)
 ```
 
 `project add`/`remove` and `model add`/`remove` edit `~/.hermes/hermes.config.ts` in place,

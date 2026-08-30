@@ -9,11 +9,20 @@ import {
   removeModelFromConfig,
   setSectionModel,
   clearSectionModel,
+  addAwsProfileToConfig,
+  removeAwsProfileFromConfig,
+  setDefaultAwsProfile,
   type ModelRoleKey,
   type ModelSection,
 } from "../src/config/edit";
-import type { ModelInput, Pricing } from "../src/config/schema";
+import type { AwsProfile, ModelInput, Pricing } from "../src/config/schema";
 import { resolveModel } from "../src/models/registry";
+import {
+  ensureAuth,
+  resolveAwsProfile,
+  type ResolvedAwsProfile,
+} from "../src/models/aws";
+import { ensureSessionAuth } from "../src/models/preflight";
 import { generateProjectDescription } from "../src/projects/describe";
 import { CONFIG_PATH } from "../src/paths";
 import {
@@ -68,6 +77,14 @@ const sessionStart = defineCommand({
   },
   run: action(async ({ args }: { args: Record<string, unknown> }) => {
     const config = await loadConfig();
+    // Preflight AWS auth for every profile this session will use (planner +
+    // implementer + summary), driving `aws sso login` when a session has expired.
+    // Runs must dispatch to detached supervisors with no TTY, so we log in here
+    // where the browser flow can complete. Inert until aws profiles are configured.
+    await ensureSessionAuth(config, {
+      plannerOverride: args.model as string | undefined,
+      autoLogin: true,
+    });
     const { runChat } = await import("../src/cli/chat");
     await runChat(config, {
       modelRef: args.model as string | undefined,
@@ -426,13 +443,31 @@ const modelAdd = defineCommand({
     },
     "input-price": { type: "string", description: "Pricing: USD per 1M input tokens (hermes runtime)" },
     "output-price": { type: "string", description: "Pricing: USD per 1M output tokens (hermes runtime)" },
-    region: { type: "string", description: "AWS region for discovery (defaults to AWS_REGION or us-east-1)" },
-    profile: { type: "string", description: "AWS named profile for discovery" },
+    region: { type: "string", description: "AWS region for discovery (defaults to the aws profile's region, AWS_REGION, or us-east-1)" },
+    profile: { type: "string", description: "Low-level AWS named profile for discovery (prefer --aws-profile)" },
+    "aws-profile": {
+      type: "string",
+      description: "Config aws-profile key (from `hermes aws list`) this model authenticates through — sets discovery creds/region and tags the entry",
+    },
   },
   run: action(async ({ args }: { args: Record<string, unknown> }) => {
     const name = String(args.name);
     const version = String(args.version);
     const providerFlag = args.provider ? String(args.provider).toLowerCase() : undefined;
+    const awsProfileKey = args["aws-profile"] ? String(args["aws-profile"]) : undefined;
+
+    // Resolve the aws-profile key (if given) so discovery authenticates as that
+    // account/region and the written entry is tagged with it.
+    let awsProfile: ResolvedAwsProfile | undefined;
+    if (awsProfileKey) {
+      const config = await loadConfig();
+      awsProfile = resolveAwsProfile(config.aws, awsProfileKey);
+      if (!awsProfile) {
+        throw new Error(
+          `Unknown aws profile "${awsProfileKey}". Add it with \`hermes aws add\` (see \`hermes aws list\`).`,
+        );
+      }
+    }
 
     const inputPrice = args["input-price"];
     const outputPrice = args["output-price"];
@@ -447,6 +482,9 @@ const modelAdd = defineCommand({
     let entry: ModelInput;
     if (args["api-model-id"]) {
       // First-party Anthropic API backend — no Bedrock discovery needed.
+      if (awsProfileKey) {
+        throw new Error("--aws-profile doesn't apply to --api-model-id (the anthropic backend uses an API key, not AWS).");
+      }
       const provider = providerFlag ?? "anthropic";
       entry = {
         name,
@@ -467,16 +505,25 @@ const modelAdd = defineCommand({
         version,
         provider: providerFlag,
         inferenceProfile: String(args["inference-profile"]),
+        ...(awsProfileKey ? { awsProfile: awsProfileKey } : {}),
         ...(pricing ? { pricing } : {}),
       };
     } else {
-      // The common path: resolve the inference profile automatically.
-      const region = args.region as string | undefined;
-      const profile = args.profile as string | undefined;
+      // The common path: resolve the inference profile automatically. Discovery
+      // authenticates as the chosen aws profile (its account/region) so the
+      // resolved ARN belongs to the account the model will actually run in.
+      const region = (args.region as string | undefined) ?? awsProfile?.region;
+      const profile = (args.profile as string | undefined) ?? awsProfile?.profile;
       console.error(
         pc.dim(`# region: ${region ?? process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1"}`),
       );
-      console.error(pc.dim(`# aws profile: ${profile ?? process.env.AWS_PROFILE ?? "(default provider chain)"}`));
+      console.error(
+        pc.dim(
+          `# aws profile: ${awsProfile ? `${awsProfile.key} (${awsProfile.profile})` : profile ?? process.env.AWS_PROFILE ?? "(default provider chain)"}`,
+        ),
+      );
+      // Drive `aws sso login` and assert the account before discovery when bound.
+      if (awsProfile) await ensureAuth(awsProfile, { autoLogin: true });
       console.error(pc.dim("# resolving inference profile via Bedrock discovery…"));
       const { resolveBinding } = await import("../src/models/select");
       const binding = await resolveBinding({
@@ -493,6 +540,7 @@ const modelAdd = defineCommand({
         version,
         provider: binding.provider,
         inferenceProfile: binding.inferenceProfile,
+        ...(awsProfileKey ? { awsProfile: awsProfileKey } : {}),
         ...(pricing ? { pricing } : {}),
       };
     }
@@ -594,8 +642,12 @@ const modelDiscover = defineCommand({
     description: "Discover Bedrock chat models your AWS identity can invoke (+ their inference-profile target)",
   },
   args: {
-    profile: { type: "string", description: "AWS named profile (defaults to the standard provider chain / AWS_PROFILE)" },
+    profile: { type: "string", description: "Low-level AWS named profile (defaults to the standard provider chain / AWS_PROFILE)" },
     region: { type: "string", description: "AWS region (defaults to AWS_REGION or us-east-1)" },
+    "aws-profile": {
+      type: "string",
+      description: "Config aws-profile key (from `hermes aws list`) to explore — sets creds + region from it",
+    },
     "profile-prefix": {
       type: "string",
       description: "Only pick application profiles whose name/id contains this substring",
@@ -611,11 +663,23 @@ const modelDiscover = defineCommand({
   },
   run: action(async ({ args }: { args: Record<string, unknown> }) => {
     const { discoverModels, groupByProvider } = await import("../src/models/discover");
-    const region = (args.region as string | undefined) ?? undefined;
-    const profile = (args.profile as string | undefined) ?? undefined;
+
+    // A config aws-profile key supplies creds + region; explicit --profile/--region override.
+    let awsProfile: ResolvedAwsProfile | undefined;
+    if (args["aws-profile"]) {
+      const config = await loadConfig();
+      awsProfile = resolveAwsProfile(config.aws, String(args["aws-profile"]));
+      if (!awsProfile) throw new Error(`Unknown aws profile "${String(args["aws-profile"])}".`);
+    }
+    const region = (args.region as string | undefined) ?? awsProfile?.region;
+    const profile = (args.profile as string | undefined) ?? awsProfile?.profile;
 
     console.error(pc.dim(`# region: ${region ?? process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1"}`));
-    console.error(pc.dim(`# aws profile: ${profile ?? process.env.AWS_PROFILE ?? "(default provider chain)"}`));
+    console.error(
+      pc.dim(
+        `# aws profile: ${awsProfile ? `${awsProfile.key} (${awsProfile.profile})` : profile ?? process.env.AWS_PROFILE ?? "(default provider chain)"}`,
+      ),
+    );
 
     let models = await discoverModels({
       region,
@@ -704,6 +768,183 @@ const model = defineCommand({
   },
 });
 
+// --- aws: named account/region/profile identities models authenticate through ---
+
+const awsList = defineCommand({
+  meta: { name: "list", description: "List configured AWS profiles (account/region) and which models use them" },
+  run: action(async () => {
+    const config = await loadConfig();
+    const keys = Object.keys(config.aws.profiles);
+    if (keys.length === 0) {
+      return void console.log(
+        pc.dim("No AWS profiles configured. Add one with `hermes aws add <key> --profile <name>`."),
+      );
+    }
+    for (const key of keys) {
+      const p = config.aws.profiles[key]!;
+      const isDefault = config.aws.default === key ? pc.green(" (default)") : "";
+      const users = config.models
+        .filter((m) => (m.awsProfile ?? config.aws.default) === key && m.backend === "bedrock")
+        .map((m) => `${m.name}@${m.version}`);
+      console.log(`${pc.bold(key)}${isDefault}  ${pc.dim(p.profile)}`);
+      console.log(
+        pc.dim(`  account: ${p.account ?? "(unset)"}   region: ${p.region ?? "(env/us-east-1)"}`),
+      );
+      console.log(pc.dim(`  models: ${users.join(", ") || "(none)"}`));
+    }
+  }),
+});
+
+/** Prints a resolved caller identity, flagging whether it matches the expected account. */
+function printIdentity(profile: ResolvedAwsProfile, identity: { account: string; arn: string }): void {
+  const match =
+    profile.account && identity.account
+      ? identity.account === profile.account
+        ? pc.green(" ✓ matches config")
+        : pc.red(` ✗ expected ${profile.account}`)
+      : "";
+  console.log(`${pc.bold(profile.key)}  ${pc.dim(profile.profile)}`);
+  console.log(pc.dim(`  account: ${identity.account}`) + match);
+  console.log(pc.dim(`  arn: ${identity.arn}`));
+}
+
+const awsAdd = defineCommand({
+  meta: { name: "add", description: "Add a named AWS profile (account/region/profile) for models to authenticate through" },
+  args: {
+    key: { type: "positional", required: true, description: "Config key models reference (e.g. coding-tools)" },
+    profile: { type: "string", required: true, description: "AWS shared-config profile name (e.g. coding-tools-aws-coding-tools-bedrock)" },
+    account: { type: "string", description: "Expected 12-digit AWS account id (auto-filled from --login when omitted)" },
+    region: { type: "string", description: "Region the inference profiles live in (e.g. us-east-1)" },
+    default: { type: "boolean", default: false, description: "Make this the default profile for models that don't name one" },
+    login: {
+      type: "boolean",
+      default: false,
+      description: "Drive `aws sso login`, verify the identity, and auto-fill --account from it",
+    },
+  },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    const key = String(args.key);
+    const profileName = String(args.profile);
+    const region = args.region ? String(args.region) : undefined;
+    let account = args.account ? String(args.account) : undefined;
+    if (account && !/^\d{12}$/.test(account)) {
+      throw new Error(`Invalid --account "${account}": expected a 12-digit AWS account id.`);
+    }
+
+    if (args.login) {
+      // Verify (logging in if needed) so we can confirm — and, when omitted,
+      // discover — the account before writing it.
+      const resolved: ResolvedAwsProfile = { key, profile: profileName, account, region };
+      const identity = await ensureAuth(resolved, { autoLogin: true });
+      if (!account) {
+        account = identity.account;
+        console.error(pc.dim(`# discovered account ${account} for profile ${profileName}`));
+      }
+    }
+
+    const profile: AwsProfile = {
+      profile: profileName,
+      ...(account ? { account } : {}),
+      ...(region ? { region } : {}),
+    };
+    const { isDefault } = await addAwsProfileToConfig(key, profile, { makeDefault: Boolean(args.default) });
+    await loadConfig(); // surface a config that no longer parses
+    console.log(pc.green(`Added aws profile ${pc.bold(key)}`) + (isDefault ? pc.green(" (default)") : ""));
+    console.log(pc.dim(`  profile: ${profileName}   account: ${account ?? "(unset)"}   region: ${region ?? "(env/us-east-1)"}`));
+    console.log(pc.dim(`  ${CONFIG_PATH}`));
+    if (!account) {
+      console.log(pc.yellow("  note: no account set — hermes can't verify this profile points at the right account. Re-run with --login or --account."));
+    }
+  }),
+});
+
+const awsRemove = defineCommand({
+  meta: { name: "remove", description: "Remove a configured AWS profile" },
+  args: { key: { type: "positional", required: true, description: "Profile key to remove" } },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    const removed = await removeAwsProfileFromConfig(String(args.key));
+    console.log(pc.green(`Removed aws profile ${pc.bold(String(args.key))}`) + pc.dim(`  ${removed.profile}`));
+    console.log(pc.dim(`  ${CONFIG_PATH}`));
+  }),
+});
+
+const awsSetDefault = defineCommand({
+  meta: { name: "set-default", description: "Set (or --clear) the default AWS profile for models that don't name one" },
+  args: {
+    key: { type: "positional", required: false, description: "Profile key to make default (omit with --clear)" },
+    clear: { type: "boolean", default: false, description: "Clear the default instead of setting it" },
+  },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    if (args.clear) {
+      await setDefaultAwsProfile(null);
+      await loadConfig();
+      console.log(pc.green("Cleared default aws profile"));
+      return void console.log(pc.dim(`  ${CONFIG_PATH}`));
+    }
+    if (!args.key) throw new Error("A profile key is required. Usage: hermes aws set-default <key> (or --clear).");
+    await setDefaultAwsProfile(String(args.key));
+    await loadConfig();
+    console.log(pc.green(`Set default aws profile → ${pc.bold(String(args.key))}`));
+    console.log(pc.dim(`  ${CONFIG_PATH}`));
+  }),
+});
+
+const awsLogin = defineCommand({
+  meta: { name: "login", description: "Sign in to an AWS profile (or all of them) via `aws sso login` and verify the identity" },
+  args: { key: { type: "positional", required: false, description: "Profile key (omit to log in to every configured profile)" } },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    const config = await loadConfig();
+    const keys = args.key ? [String(args.key)] : Object.keys(config.aws.profiles);
+    if (keys.length === 0) {
+      return void console.log(pc.dim("No AWS profiles configured. Add one with `hermes aws add`."));
+    }
+    for (const key of keys) {
+      const resolved = resolveAwsProfile(config.aws, key);
+      if (!resolved) throw new Error(`Unknown aws profile "${key}".`);
+      const identity = await ensureAuth(resolved, { autoLogin: true });
+      printIdentity(resolved, identity);
+    }
+  }),
+});
+
+const awsWhoami = defineCommand({
+  meta: { name: "whoami", description: "Verify AWS identity for a profile (or all) without logging in — checks the account matches" },
+  args: { key: { type: "positional", required: false, description: "Profile key (omit to check every configured profile)" } },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    const config = await loadConfig();
+    const keys = args.key ? [String(args.key)] : Object.keys(config.aws.profiles);
+    if (keys.length === 0) {
+      return void console.log(pc.dim("No AWS profiles configured. Add one with `hermes aws add`."));
+    }
+    let failed = false;
+    for (const key of keys) {
+      const resolved = resolveAwsProfile(config.aws, key);
+      if (!resolved) throw new Error(`Unknown aws profile "${key}".`);
+      try {
+        const identity = await ensureAuth(resolved, { autoLogin: false });
+        printIdentity(resolved, identity);
+      } catch (err) {
+        failed = true;
+        console.log(`${pc.bold(key)}  ${pc.dim(resolved.profile)}`);
+        console.log(pc.red(`  ${err instanceof Error ? err.message : String(err)}`));
+      }
+    }
+    if (failed) process.exit(1);
+  }),
+});
+
+const aws = defineCommand({
+  meta: { name: "aws", description: "AWS profiles — the accounts/regions models authenticate through" },
+  subCommands: {
+    list: awsList,
+    add: awsAdd,
+    remove: awsRemove,
+    "set-default": awsSetDefault,
+    login: awsLogin,
+    whoami: awsWhoami,
+  },
+});
+
 const project = defineCommand({
   meta: { name: "project", description: "Project registry" },
   subCommands: { list: projectList, add: projectAdd, remove: projectRemove },
@@ -746,6 +987,7 @@ const subCommands = {
   watch,
   model,
   project,
+  aws,
   __supervise: superviseCmd,
 };
 

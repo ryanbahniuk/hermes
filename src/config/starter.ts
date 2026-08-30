@@ -9,11 +9,26 @@ export default {
     // { name: "example", path: "~/code/example", description: "What this repo is / does." },
   ],
 
+  // Named AWS identities that bedrock models authenticate through. Each entry pins
+  // a shared-config \`profile\`, its 12-digit \`account\` (verified via STS so a wrong
+  // or expired profile fails loudly), and the \`region\` its inference profiles live
+  // in. A model selects one by key with \`awsProfile\`; \`default\` is used otherwise —
+  // so different models can live in different accounts. Manage with \`hermes aws …\`
+  // (add / remove / set-default / login / whoami).
+  aws: {
+    profiles: {
+      // "coding-tools": { profile: "coding-tools-aws-coding-tools-bedrock", account: "602028460818", region: "us-east-1" },
+    },
+    // default: "coding-tools",
+  },
+
   // Models available to the planner and implementers.
-  //   runtime  defaults: provider "anthropic" -> "claude", otherwise -> "hermes".
-  //   backend  defaults to "bedrock".
-  // Tip: \`hermes model add <name> <version> --model-id <id>\` appends entries here
-  // and resolves the inference profile for you — \`hermes model discover\` lists ids.
+  //   runtime     defaults: provider "anthropic" -> "claude", otherwise -> "hermes".
+  //   backend     defaults to "bedrock".
+  //   awsProfile  key into \`aws.profiles\` above; falls back to \`aws.default\`.
+  // Tip: \`hermes model add <name> <version> --model-id <id> --aws-profile <key>\`
+  // appends entries here and resolves the inference profile for you —
+  // \`hermes model discover\` lists ids.
   models: [
     {
       name: "claude-sonnet",
@@ -22,6 +37,7 @@ export default {
       // Replace with a real Bedrock inference-profile id for your account (or run
       // \`hermes model remove claude-sonnet 4.5\` then \`hermes model add\` to resolve it):
       inferenceProfile: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      // awsProfile: "coding-tools",  // which account/region this model uses
     },
 
     // First-party Anthropic API backend (needs ANTHROPIC_API_KEY in your env):

@@ -70,6 +70,26 @@ and `hermes` (LangGraph over Bedrock Converse, for any non-Anthropic model). You
 config; Hermes selects the runtime per model. Same two-runtime split for the planner as for
 workers.
 
+### AWS profiles (which account a model runs in)
+A Bedrock model doesn't just have an id — it lives in an **AWS account**, in a region. You
+declare those identities once as named **aws profiles** (`{ profile, account, region }`) and each
+model points at one with `awsProfile` (or falls back to `aws.default`). Because the identity
+travels *with the model*, different models can run in **different accounts** — a planner in one, a
+cheaper worker in another — and Hermes authenticates each as its own identity, for both runtimes.
+
+Two things follow from that, and they're the whole reason it's a first-class concept rather than
+an ambient `AWS_PROFILE`:
+- **It signs you in.** Starting a session checks every profile it will use and runs
+  `aws sso login` for you when a session has expired (you finish the browser flow); the background
+  supervisor re-checks and stops with a clear "run `hermes aws login <key>`" instead of failing
+  mid-run.
+- **It verifies the account.** Before spending, Hermes calls `sts:GetCallerIdentity` and asserts
+  you're actually on the account the config expects — so a wrong or stale profile fails loudly
+  ("expected 602028460818, got …") instead of silently invoking the wrong account.
+
+Declare none and Hermes just uses your ambient AWS credentials, exactly as before — the feature
+is opt-in.
+
 ## How they relate (cardinality)
 
 ```
@@ -152,3 +172,4 @@ The CLI is grouped by the three concepts — `session`, `run`, `task` — each w
 | Manage projects | `hermes project list` · `hermes project add <name> <path>` · `hermes project remove <name>` |
 | Manage models | `hermes model list` · `hermes model discover` · `hermes model add <name> <version> --model-id <id>` · `hermes model remove <name> [version]` |
 | Choose role models | `hermes model set-default <role> <name>` (fallback) · `hermes model set <role> <name>` (hard pin, wins over routing) · `… <role> --clear` |
+| Manage AWS accounts | `hermes aws list` · `hermes aws add <key> --profile <name> --login` · `hermes aws login [key]` · `hermes aws whoami [key]` · `hermes aws set-default <key>` |
