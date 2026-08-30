@@ -113,6 +113,15 @@ export function setSupervisorPid(runId: string, pid: number | null): void {
     .run(pid, nowIso(), runId);
 }
 
+/**
+ * Deletes a run and everything that hangs off it — tasks, shared-context
+ * versions, and amendments all cascade via their `ON DELETE CASCADE` foreign
+ * keys. Does not touch worktrees/logs on disk (callers clean those up first).
+ */
+export function deleteRun(runId: string): void {
+  getDb().prepare(`DELETE FROM runs WHERE id = ?`).run(runId);
+}
+
 // ---- tasks ----------------------------------------------------------------
 
 export function createTask(input: {
@@ -331,6 +340,25 @@ export function sessionTotalCost(sessionId: string): SessionCost {
     .get(sessionId) as { c: number };
   const work = row.c;
   return { planner, work, total: planner + work };
+}
+
+/**
+ * Deletes a session and all of its data. `session_messages` cascade from the
+ * session row, but `runs` only carry a plain `session_id` column (no foreign
+ * key), so we delete them explicitly here — each run in turn cascades to its
+ * tasks, shared-context, and amendments. Runs on time in one transaction.
+ * On-disk artifacts (worktrees, logs) are the caller's responsibility.
+ */
+export function deleteSession(sessionId: string): void {
+  const db = getDb();
+  db.transaction(() => {
+    const runs = db
+      .prepare(`SELECT id FROM runs WHERE session_id = ?`)
+      .all(sessionId) as { id: string }[];
+    const delRun = db.prepare(`DELETE FROM runs WHERE id = ?`);
+    for (const r of runs) delRun.run(r.id);
+    db.prepare(`DELETE FROM sessions WHERE id = ?`).run(sessionId);
+  })();
 }
 
 export function addSessionMessage(input: {

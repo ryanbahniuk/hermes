@@ -169,6 +169,7 @@ The CLI is grouped by the three concepts — `session`, `run`, `task` — each w
 | Inspect a batch | `tack run list` · `tack task list <run>` · `tack run show <run>` |
 | Watch work happen | `tack run logs <run> -f` · `tack watch` |
 | Control a batch | `tack run stop <run>` · `tack run retry <run>` |
+| Stop / delete a conversation | `tack session kill <session>` (stop its runs, keep data) · `tack session delete <session>` (erase it entirely) |
 | Manage projects | `tack project list` · `tack project add <name> <path>` · `tack project remove <name>` |
 | Manage models | `tack model list` · `tack model discover` · `tack model add <name> <version> --model-id <id>` · `tack model remove <name> [version]` |
 | Choose role models | `tack model set-default <role> <name>` (fallback) · `tack model set <role> <name>` (hard pin, wins over routing) · `… <role> --clear` |

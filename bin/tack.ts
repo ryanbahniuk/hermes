@@ -38,9 +38,13 @@ import {
   getSession,
   listRunsBySession,
   sessionTotalCost,
+  setSessionStatus,
+  deleteSession,
 } from "../src/db";
 import { spawnSupervisor, isAlive } from "../src/process/spawn";
-import { followLog, readLog, runLogFile, taskLogFile } from "../src/logging/logs";
+import { followLog, readLog, runLogFile, taskLogFile, runLogDir } from "../src/logging/logs";
+import { purgeRunWorktrees } from "../src/worktree/worktree";
+import { rmSync } from "node:fs";
 import { initHome } from "../src/init";
 import { supervise } from "../src/orchestrator/supervise";
 
@@ -273,6 +277,86 @@ const sessionShow = defineCommand({
   run: action(({ args }: { args: Record<string, unknown> }) => {
     db();
     showSession(String(args.session));
+  }),
+});
+
+/**
+ * SIGTERMs the live supervisor of every run the session dispatched, clearing
+ * each stopped run's recorded pid. Returns how many supervisors were signalled.
+ * Terminal/already-dead runs are left untouched.
+ */
+function stopSessionRuns(sessionId: string): number {
+  let stopped = 0;
+  for (const r of listRunsBySession(sessionId)) {
+    if (!isAlive(r.supervisor_pid)) continue;
+    try {
+      process.kill(r.supervisor_pid!, "SIGTERM");
+      setSupervisorPid(r.id, null);
+      stopped++;
+    } catch {
+      // Already gone between the liveness check and the signal — nothing to do.
+    }
+  }
+  return stopped;
+}
+
+const sessionKill = defineCommand({
+  meta: { name: "kill", description: "Stop a session's background runs and mark it closed (keeps its data)" },
+  args: { session: { type: "positional", required: true, description: "session id" } },
+  run: action(({ args }: { args: Record<string, unknown> }) => {
+    db();
+    const s = getSession(String(args.session));
+    if (!s) throw new Error(`No such session: ${args.session}`);
+    const stopped = stopSessionRuns(s.id);
+    setSessionStatus(s.id, "closed");
+    console.log(
+      pc.green(`Killed session ${pc.bold(s.id)}`) +
+        pc.dim(stopped > 0 ? `  (stopped ${stopped} run supervisor${stopped === 1 ? "" : "s"})` : "  (no runs were live)"),
+    );
+    console.log(pc.dim(`  delete it entirely with: tack session delete ${s.id}`));
+  }),
+});
+
+const sessionDelete = defineCommand({
+  meta: {
+    name: "delete",
+    description: "Permanently delete a session: stop its runs, remove worktrees + logs, and erase all its data",
+  },
+  args: { session: { type: "positional", required: true, description: "session id" } },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    db();
+    const s = getSession(String(args.session));
+    if (!s) throw new Error(`No such session: ${args.session}`);
+
+    // 1. Stop anything still running so we don't delete rows out from under a
+    //    live supervisor (which would keep writing to a now-orphaned run).
+    const stopped = stopSessionRuns(s.id);
+
+    // 2. Best-effort disk cleanup per run: git worktrees + branches, then logs.
+    //    Resolve each project's repo root from config; a config that no longer
+    //    loads or lists a project just means the on-disk sweep does the pruning.
+    let projectRepos = new Map<string, string>();
+    try {
+      const config = await loadConfig();
+      projectRepos = new Map(config.projects.map((p) => [p.name, p.path]));
+    } catch {
+      // No usable config — fall back to the directory-level sweep below.
+    }
+    const runs = listRunsBySession(s.id);
+    for (const r of runs) {
+      const projects = [...new Set(listTasks(r.id).map((t) => t.project_name))]
+        .filter((name) => projectRepos.has(name))
+        .map((name) => ({ name, repo: projectRepos.get(name)! }));
+      purgeRunWorktrees(r.id, projects);
+      rmSync(runLogDir(r.id), { recursive: true, force: true });
+    }
+
+    // 3. Erase every DB row (runs cascade to tasks/context/amendments; the
+    //    session cascades to its messages).
+    deleteSession(s.id);
+
+    console.log(pc.green(`Deleted session ${pc.bold(s.id)}`) + pc.dim(`  (${runs.length} run${runs.length === 1 ? "" : "s"} removed)`));
+    if (stopped > 0) console.log(pc.dim(`  stopped ${stopped} live run supervisor${stopped === 1 ? "" : "s"}`));
   }),
 });
 
@@ -1041,7 +1125,7 @@ const superviseCmd = defineCommand({
 // config registries.
 const session = defineCommand({
   meta: { name: "session", description: "Planning sessions — the primary interface" },
-  subCommands: { start: sessionStart, list: sessionList, show: sessionShow },
+  subCommands: { start: sessionStart, list: sessionList, show: sessionShow, kill: sessionKill, delete: sessionDelete },
 });
 
 const run = defineCommand({

@@ -245,6 +245,8 @@ resident:
 | `tack run stop <run>` | Read `supervisor_pid`, send SIGTERM. |
 | `tack run retry <run>` | Respawn a supervisor; skip done tasks, resume in-flight ones from their runtime state. |
 | `tack session show <session>` | Print the session's Run → Task tree (top-down view). |
+| `tack session kill <session>` | SIGTERM every dispatched run's supervisor, clear its pid, mark the session **closed**. Data is kept. |
+| `tack session delete <session>` | Kill first, then best-effort remove each run's worktrees + branches and log dir, then delete the session and every row it owns (runs cascade to tasks/context/amendments; the session cascades to its messages). |
 
 **Terminal close vs. reboot:** detaching (new session + unref) means closing your terminal or
 shell does **not** kill a run; a machine reboot **does** (these are plain processes, not a
@@ -417,6 +419,8 @@ tack [session start] [--model <name>] [--resume <sessionId>]  # primary interfac
 tack session list                                         # list planning sessions
 tack session show <sessionId>                             # a session's run/task tree
                                                             # (work is kicked off only via a session's delegate)
+tack session kill <sessionId>                             # stop its runs, mark it closed (keeps data)
+tack session delete <sessionId>                           # erase it: runs, worktrees, logs, messages
 
 tack run list [--status <s>]                              # list runs
 tack run show <run>                                       # detail: context, amendments, diffs

@@ -252,6 +252,8 @@ tack session start --model claude-sonnet
 tack session start --resume <sessionId>   # or: tack --resume <sessionId>
 tack session list                # list your planning sessions
 tack session show <sessionId>    # its run/task tree (top-down view)
+tack session kill <sessionId>    # stop its background runs + mark it closed (keeps data)
+tack session delete <sessionId>  # permanently erase it (runs, worktrees, logs, messages)
 ```
 
 You then just talk to the planner. It asks clarifying questions, reads your projects
@@ -282,6 +284,8 @@ tack watch                # live Ink dashboard (press q to quit)
 # Control
 tack run stop <run>       # SIGTERM the run's supervisor
 tack run retry <run>      # respawn the supervisor to re-run incomplete tasks
+tack session kill <sess>  # stop every run the session dispatched, mark it closed
+tack session delete <sess># erase the session and everything it spawned (worktrees, logs, rows)
 
 # Registries
 tack project list
