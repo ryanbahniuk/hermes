@@ -769,11 +769,73 @@ const modelDiscover = defineCommand({
   }),
 });
 
+const modelVerify = defineCommand({
+  meta: {
+    name: "verify",
+    description: "Invoke one registered model with a minimal request to confirm it works (real, billable call)",
+  },
+  args: {
+    name: { type: "positional", required: true, description: "Model name (or name@version)" },
+    version: { type: "positional", required: false, description: "Version (required when the name has multiple entries)" },
+    backend: {
+      type: "string",
+      description: "Pick a backend (bedrock|anthropic) when the model is registered under both",
+    },
+    timeout: { type: "string", description: "Per-model timeout in milliseconds (default: 30000)" },
+    json: { type: "boolean", default: false, description: "Emit raw JSON instead of the human view" },
+  },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    const { verifyResolvedModel } = await import("../src/models/verify");
+
+    const config = await loadConfig();
+    const ref = args.version ? `${args.name}@${args.version}` : String(args.name);
+    const backend = args.backend as "bedrock" | "anthropic" | undefined;
+    if (backend && backend !== "bedrock" && backend !== "anthropic") {
+      throw new Error(`--backend must be "bedrock" or "anthropic" (got "${backend}").`);
+    }
+    const resolved = resolveModel(config, ref, backend);
+    const label = `${resolved.name}@${resolved.version}`;
+
+    // A bedrock model authenticates through its configured aws profile — drive
+    // `aws sso login` and assert the account before the billable probe.
+    if (resolved.target.kind === "bedrock") {
+      await ensureAuth(resolved.aws, { autoLogin: true });
+    }
+
+    const target =
+      resolved.target.kind === "bedrock"
+        ? resolved.target.inferenceProfile
+        : resolved.target.apiModelId;
+    console.error(
+      pc.dim(`# verifying ${label} (${resolved.backend}: ${target}) with a minimal invocation (real, billable call)…`),
+    );
+
+    const verification = await verifyResolvedModel(resolved, {
+      timeoutMs: args.timeout ? parseInt(String(args.timeout), 10) : undefined,
+    });
+
+    if (args.json) {
+      console.log(JSON.stringify({ model: label, backend: resolved.backend, target, verification }, null, 2));
+      if (!verification.ok) process.exit(1);
+      return;
+    }
+
+    if (verification.ok) {
+      console.log(`${pc.green("✓ works")}  ${pc.bold(label)}  ${pc.dim(verification.detail)}`);
+      return;
+    }
+    console.log(`${pc.red("✗ fails")}  ${pc.bold(label)}`);
+    console.log(pc.dim(`  reason: ${verification.detail}`));
+    process.exit(1);
+  }),
+});
+
 const model = defineCommand({
   meta: { name: "model", description: "Model registry" },
   subCommands: {
     list: modelList,
     discover: modelDiscover,
+    verify: modelVerify,
     add: modelAdd,
     remove: modelRemove,
     "set-default": modelSetDefault,

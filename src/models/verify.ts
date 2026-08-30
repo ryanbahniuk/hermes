@@ -3,6 +3,7 @@ import {
   ConverseCommand,
 } from "@aws-sdk/client-bedrock-runtime";
 import type { AwsCredentialIdentityProvider } from "@aws-sdk/types";
+import { credentialsFor, regionFor } from "./aws";
 import { defaultRegion } from "./chat";
 import {
   resolveCredentials,
@@ -11,6 +12,7 @@ import {
   type Verification,
 } from "./discover";
 import { mantleApi, mantleFetch } from "./mantle";
+import type { ResolvedModel } from "./registry";
 
 /**
  * Verification actually invokes each discovered model with a minimal request to
@@ -152,6 +154,66 @@ function verifyOne(
   return model.transport === "mantle"
     ? verifyMantle(model, opts, credentials)
     : verifyBedrock(model, opts, credentials);
+}
+
+/** Probes the first-party Anthropic Messages API with a minimal request. */
+async function verifyAnthropicApi(
+  apiModelId: string,
+  opts: VerifyOptions,
+): Promise<Verification> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return { ok: false, detail: `backend "anthropic" requires ANTHROPIC_API_KEY in the environment` };
+  }
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: apiModelId,
+        max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+        messages: [{ role: "user", content: opts.prompt ?? DEFAULT_PROMPT }],
+      }),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+    });
+    if (res.ok) return { ok: true, detail: `HTTP ${res.status}` };
+    const text = (await res.text()).replace(/\s+/g, " ").trim();
+    return { ok: false, detail: `HTTP ${res.status}: ${text.slice(0, 160)}` };
+  } catch (err) {
+    return { ok: false, detail: shortError(err) };
+  }
+}
+
+/**
+ * Verifies a single *registered* model by invoking it with a minimal real (and
+ * therefore billable) request — a bedrock model via the Converse API,
+ * authenticating through its configured aws profile; an anthropic-backed model
+ * via the first-party Messages API. Never throws: failures come back as
+ * `{ ok: false }` with a compact reason.
+ */
+export function verifyResolvedModel(
+  model: ResolvedModel,
+  opts: VerifyOptions = {},
+): Promise<Verification> {
+  if (model.target.kind === "anthropic") {
+    return verifyAnthropicApi(model.target.apiModelId, opts);
+  }
+  const region = opts.region ?? regionFor(model.aws);
+  const credentials = credentialsFor(model.aws);
+  const discovered: DiscoveredModel = {
+    provider: model.provider,
+    modelId: model.target.inferenceProfile,
+    transport: "bedrock",
+    target: model.target.inferenceProfile,
+    status: "READY",
+    candidates: [model.target.inferenceProfile],
+    source: "config",
+  };
+  return verifyBedrock(discovered, { ...opts, region }, credentials);
 }
 
 /**
