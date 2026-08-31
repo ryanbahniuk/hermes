@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { listRunsBySession, sessionTotalCost, type RunRow, type SessionCost } from "../../db";
+import {
+  listRunsBySession,
+  listSessionPrs,
+  sessionTotalCost,
+  type RunRow,
+  type SessionCost,
+  type SessionPrRow,
+} from "../../db";
 import type { PlannerEvent } from "../../planner/runtime";
 import type { PlannerSession } from "../../planner/session";
 import { Horse } from "./Horse";
 import { Prompt } from "./Prompt";
-import { runLive, usd } from "./theme";
+import { prLive, runLive, usd } from "./theme";
 import { createTurnQueue, type TurnQueue } from "./turnQueue";
 import { useTerminalSize } from "./useTerminalSize";
 
@@ -17,7 +24,8 @@ type Line =
   | { id: string; kind: "error"; message: string }
   | { id: string; kind: "notice"; text: string }
   | { id: string; kind: "cost"; cost: SessionCost }
-  | { id: string; kind: "runs"; runs: RunRow[] };
+  | { id: string; kind: "runs"; runs: RunRow[] }
+  | { id: string; kind: "prs"; prs: SessionPrRow[] };
 
 /** One transcript line. Kept dumb: every visual decision lives here. */
 function LineView({ line }: { line: Line }): React.ReactElement | null {
@@ -60,12 +68,34 @@ function LineView({ line }: { line: Line }): React.ReactElement | null {
           })}
         </Box>
       );
+    case "prs":
+      if (line.prs.length === 0) return <Text dimColor>{"  (no PRs opened yet)"}</Text>;
+      return (
+        <Box flexDirection="column">
+          {line.prs.map((pr) => {
+            const live = prLive(pr);
+            const num = pr.number != null ? `#${pr.number}` : pr.url;
+            return (
+              <Text key={pr.id}>
+                {"  "}
+                <Text color={live.color} dimColor={live.dim}>
+                  {live.label.padEnd(6)}
+                </Text>{" "}
+                <Text bold>{num}</Text>{" "}
+                {pr.project_name && <Text dimColor>{pr.project_name + "  "}</Text>}
+                <Text dimColor>{(pr.title ?? pr.url).slice(0, 60)}</Text>
+              </Text>
+            );
+          })}
+        </Box>
+      );
   }
 }
 
 const HELP: string[] = [
   "  Commands:",
   "    /runs     list runs dispatched from this session",
+  "    /prs      list PRs opened by this session",
   "    /help     show this help",
   "    /exit     leave the session (it's saved; resume any time)",
 ];
@@ -256,14 +286,21 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
       );
       return;
     }
+    if (text === "/prs") {
+      append(
+        { id: nextId(), kind: "user", text },
+        { id: nextId(), kind: "prs", prs: listSessionPrs(session.id) },
+      );
+      return;
+    }
 
     // Everything else becomes a planner turn: enqueue and let the queue drain.
     queueRef.current!.submit(text);
   }
 
   const footer = embedded
-    ? `Esc back · PgUp/PgDn scroll · /runs /help /exit · ${usd(cost.total)}`
-    : `/runs · /help · /exit · PgUp/PgDn scroll · Ctrl-C to quit · ${usd(cost.total)}`;
+    ? `Esc back · PgUp/PgDn scroll · /runs /prs /help /exit · ${usd(cost.total)}`
+    : `/runs · /prs · /help · /exit · PgUp/PgDn scroll · Ctrl-C to quit · ${usd(cost.total)}`;
 
   // Transcript = committed history + the in-flight turn, as one scroll stream.
   // Follow mode (anchor === null) pins to the newest line; when scrolled up,

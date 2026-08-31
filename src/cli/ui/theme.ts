@@ -1,4 +1,4 @@
-import type { RunRow, SessionRow } from "../../db";
+import type { RunRow, SessionPrRow, SessionRow } from "../../db";
 import { isAlive } from "../../process/spawn";
 
 /** A status rendered as a colored label — the shared vocabulary of the TUIs. */
@@ -71,6 +71,25 @@ export function sessionLive(s: SessionRow): Live {
   return isAlive(s.pid) && fresh
     ? { label: "active", color: "green", dim: false }
     : { label: "dead", color: "yellow", dim: false };
+}
+
+/**
+ * A PR's status as a colored label, mirroring `runLive`/`sessionLive` so PRs read
+ * with the same vocabulary in the dashboard and the chat view. States are stored
+ * lowercased (see `src/projects/prs.ts`): open reads green (live), merged magenta
+ * (GitHub's color, dimmed as it's terminal), closed red+dim; anything else gray.
+ */
+export function prLive(pr: SessionPrRow): Live {
+  switch (pr.state) {
+    case "open":
+      return { label: "open", color: "green", dim: false };
+    case "merged":
+      return { label: "merged", color: "magenta", dim: true };
+    case "closed":
+      return { label: "closed", color: "red", dim: true };
+    default:
+      return { label: pr.state ?? "unknown", color: "gray", dim: true };
+  }
 }
 
 /** A destructive action offered on a dashboard row: its key and hint verb. */

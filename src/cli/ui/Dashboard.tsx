@@ -3,11 +3,13 @@ import { Box, Text, useInput } from "ink";
 import type { TackConfig } from "../../config/schema";
 import {
   listRunsBySession,
+  listSessionPrs,
   listSessions,
   listTasks,
   sessionTotalCost,
   type RunRow,
   type SessionCost,
+  type SessionPrRow,
   type SessionRow,
 } from "../../db";
 import {
@@ -20,6 +22,7 @@ import {
 } from "../../sessions/actions";
 import {
   actionHint,
+  prLive,
   runActions,
   runLive,
   sessionActions,
@@ -39,7 +42,8 @@ type Row =
       /** Every run terminal → archive is eligible. Computed here so it's the one source. */
       allRunsTerminal: boolean;
     }
-  | { key: string; kind: "run"; run: RunRow; taskCount: number };
+  | { key: string; kind: "run"; run: RunRow; taskCount: number }
+  | { key: string; kind: "pr"; pr: SessionPrRow };
 
 function buildRows(showArchived: boolean): Row[] {
   const rows: Row[] = [];
@@ -55,6 +59,9 @@ function buildRows(showArchived: boolean): Row[] {
     for (const r of runs) {
       rows.push({ key: `r:${r.id}`, kind: "run", run: r, taskCount: listTasks(r.id).length });
     }
+    for (const pr of listSessionPrs(s.id)) {
+      rows.push({ key: `pr:${pr.id}`, kind: "pr", pr });
+    }
   }
   return rows;
 }
@@ -65,9 +72,9 @@ function buildRows(showArchived: boolean): Row[] {
  * so an offered affordance can never diverge from what the key actually does.
  */
 function actionsFor(row: Row): RowAction[] {
-  return row.kind === "session"
-    ? sessionActions(row.session, row.allRunsTerminal)
-    : runActions(row.run);
+  if (row.kind === "session") return sessionActions(row.session, row.allRunsTerminal);
+  if (row.kind === "run") return runActions(row.run);
+  return []; // PR rows are informational — no destructive actions.
 }
 
 function RowView({ row, selected }: { row: Row; selected: boolean }): React.ReactElement {
@@ -98,6 +105,24 @@ function RowView({ row, selected }: { row: Row; selected: boolean }): React.Reac
         </Text>
         {/* Only the transitions valid for this session's state are offered. */}
         {selected && actions.length > 0 && <Text color="yellow">{"  " + actionHint(actions)}</Text>}
+      </Box>
+    );
+  }
+
+  if (row.kind === "pr") {
+    const { pr } = row;
+    const live = prLive(pr);
+    const num = pr.number != null ? `#${pr.number}` : pr.url;
+    return (
+      <Box>
+        {pointer}
+        <Text>{"  "}</Text>
+        <Text color={live.color} dimColor={live.dim}>
+          {live.label.padEnd(8)}
+        </Text>
+        <Text dimColor>
+          {num + (pr.project_name ? "  " + pr.project_name : "") + "  " + (pr.title ?? pr.url).slice(0, 40)}
+        </Text>
       </Box>
     );
   }
@@ -179,7 +204,8 @@ export function Dashboard({
       const row = rows[active];
       if (!row) return;
       if (row.kind === "session") onOpenSession(row.session.id);
-      else onOpenRun(row.run.id);
+      else if (row.kind === "run") onOpenRun(row.run.id);
+      // PR rows are informational — Enter does nothing (no read-only view yet).
       return;
     }
     // Destructive actions fire immediately on the highlighted row; the next poll
@@ -191,7 +217,7 @@ export function Dashboard({
       // e.g. `x` on a terminal run or a non-active session does nothing.
       if (!actionsFor(row).some((a) => a.key === "x")) return;
       if (row.kind === "session") killSession(row.session.id);
-      else stopRun(row.run);
+      else if (row.kind === "run") stopRun(row.run);
       return void setRows(buildRows(showArchived));
     }
     if (input === "a") {
