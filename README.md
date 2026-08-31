@@ -291,7 +291,7 @@ lifecycle control over runs a session has already dispatched.
 ### Inspecting and controlling dispatched runs
 
 The CLI is organized by the three model concepts — **`session`**, **`run`**, **`task`** — each
-grouping the verbs that act on it (plus the top-level `watch`, `init`, `model`, `project`).
+grouping the verbs that act on it (plus the top-level `stable`, `init`, `model`, `project`).
 
 ```bash
 # Inspect
@@ -301,7 +301,7 @@ tack run show <run>       # a run's contract, tasks, amendments
 tack session show <sess>  # a session's run/task tree (top-down view)
 tack run logs <run> [-f]  # tail a run's log (-f to follow)
 tack task logs <task> [-f]# tail a task's log
-tack watch                # live Ink dashboard (press q to quit)
+tack stable               # interactive Ink dashboard: open a session to chat, a run to watch its log
 
 # Control
 tack run stop <run>       # SIGTERM the run's supervisor

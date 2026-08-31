@@ -168,7 +168,7 @@ The CLI is grouped by the three concepts — `session`, `run`, `task` — each w
 | Inspect a whole conversation | `tack session show <session>` (its run/task tree) |
 | See the PRs a session opened | `tack session prs <session>` · `… --refresh` to rediscover via `gh` |
 | Inspect a batch | `tack run list` · `tack task list <run>` · `tack run show <run>` |
-| Watch work happen | `tack run logs <run> -f` · `tack watch` |
+| Watch work happen | `tack run logs <run> -f` · `tack stable` |
 | Control a batch | `tack run stop <run>` · `tack run retry <run>` |
 | Stop / delete a conversation | `tack session kill <session>` (stop its runs, keep data) · `tack session delete <session>` (erase it entirely) |
 | Manage projects | `tack project list` · `tack project add <name> <path>` · `tack project remove <name>` |

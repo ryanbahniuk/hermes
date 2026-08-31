@@ -427,11 +427,15 @@ const sessionDelete = defineCommand({
   }),
 });
 
-const watch = defineCommand({
-  meta: { name: "watch", description: "Live dashboard of runs and agents (Ink)" },
+const stable = defineCommand({
+  meta: {
+    name: "stable",
+    description: "Interactive dashboard of sessions & runs — open a session to chat, a run to watch its log (Ink)",
+  },
   run: action(async () => {
-    const { runWatch } = await import("../src/cli/watch");
-    await runWatch();
+    const config = await loadConfig();
+    const { runStable } = await import("../src/cli/stable");
+    await runStable(config);
   }),
 });
 
@@ -1322,7 +1326,7 @@ const superviseCmd = defineCommand({
 });
 
 // The three model concepts are the top-level nouns; each groups the verbs that
-// act on it. `init`/`watch` are cross-cutting, and `model`/`project` are the
+// act on it. `init`/`stable` are cross-cutting, and `model`/`project` are the
 // config registries.
 const session = defineCommand({
   meta: { name: "session", description: "Planning sessions — the primary interface" },
@@ -1344,7 +1348,7 @@ const subCommands = {
   run,
   task,
   init,
-  watch,
+  stable,
   model,
   project,
   aws,

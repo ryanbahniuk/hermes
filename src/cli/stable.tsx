@@ -1,0 +1,72 @@
+import { useState } from "react";
+import { Box, render, Text, useApp, useInput } from "ink";
+import type { TackConfig } from "../config/schema";
+import { db } from "../db";
+import { PlannerSession } from "../planner/session";
+import { ChatView } from "./ui/ChatView";
+import { Dashboard } from "./ui/Dashboard";
+import { LogView } from "./ui/LogView";
+import { ensureInteractive } from "./ui/tty";
+
+type PriorMessage = { role: "user" | "assistant"; content: string };
+
+// The stable app is a small view state machine: the dashboard is home, and
+// selecting a row pushes into either a live chat or a read-only run log. Esc/q
+// from those pops back home; q at home quits.
+type Mode =
+  | { name: "dashboard" }
+  | { name: "chat"; session: PlannerSession; history: PriorMessage[] }
+  | { name: "log"; runId: string }
+  | { name: "error"; message: string };
+
+function ErrorView({ message, onBack }: { message: string; onBack: () => void }): React.ReactElement {
+  useInput((input, key) => {
+    if (key.escape || input === "q") onBack();
+  });
+  return (
+    <Box flexDirection="column" padding={1}>
+      <Text color="red">Couldn't open session: {message}</Text>
+      <Text dimColor>press q or Esc to go back</Text>
+    </Box>
+  );
+}
+
+function Stable({ config }: { config: TackConfig }): React.ReactElement {
+  const { exit } = useApp();
+  const [mode, setMode] = useState<Mode>({ name: "dashboard" });
+
+  const openSession = (sessionId: string) => {
+    try {
+      const session = PlannerSession.open(config, sessionId);
+      setMode({ name: "chat", session, history: session.history() });
+    } catch (err) {
+      setMode({ name: "error", message: (err as Error).message });
+    }
+  };
+  const back = () => setMode({ name: "dashboard" });
+
+  switch (mode.name) {
+    case "dashboard":
+      return (
+        <Dashboard
+          onOpenSession={openSession}
+          onOpenRun={(runId) => setMode({ name: "log", runId })}
+          onQuit={() => exit()}
+        />
+      );
+    case "chat":
+      return <ChatView session={mode.session} history={mode.history} onExit={back} embedded />;
+    case "log":
+      return <LogView runId={mode.runId} onExit={back} />;
+    case "error":
+      return <ErrorView message={mode.message} onBack={back} />;
+  }
+}
+
+/** Renders the interactive stable dashboard until the user quits. */
+export async function runStable(config: TackConfig): Promise<void> {
+  if (!ensureInteractive("stable")) return;
+  db();
+  const app = render(<Stable config={config} />);
+  await app.waitUntilExit();
+}

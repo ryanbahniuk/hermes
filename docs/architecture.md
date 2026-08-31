@@ -466,7 +466,7 @@ tack run retry <run>                                      # respawn supervisor f
 tack task list [<run>]                                    # list tasks/agents
 tack task logs <task> [-f]                                # tail the per-task log
 
-tack watch                                                # Ink live dashboard
+tack stable                                               # interactive Ink dashboard (drill into a session's chat or a run's log)
 
 tack project add <path>                                   # read README + CLAUDE.md → draft description → write config
 tack project list | rm <name>
@@ -482,7 +482,7 @@ bin/
   tack.ts          # CLI entry (citty), Bun shebang
   supervisor.ts      # detached supervisor entrypoint: `bun supervisor.ts <runId>`
 src/
-  cli/               # citty commands + Ink dashboard + chat REPL (cli/chat.ts)
+  cli/               # Ink TUIs: chat (cli/chat.tsx), stable dashboard (cli/stable.tsx), shared components (cli/ui/)
   config/            # load tack.config.ts; project/model registries; allowlist
   models/            # registry resolution → { runtime, inferenceProfile }
   planner/           # planning sessions: PlannerRuntime (claude|tack), actions,
@@ -520,7 +520,7 @@ docs/architecture.md # this file
 7. ✅ **Live amendments + adjudication** — option (b): `propose_amendment` is adjudicated synchronously
    by the powerful model (accept → version-bump; reject → conform; degrades to queuing). *Deferred
    live test* — the adjudicator uses `ChatBedrockConverse` (credential note).
-8. ✅ **Ink dashboard (`tack watch`) + `tack show` + cost accounting.**
+8. ✅ **Ink dashboard (`tack stable`) + `tack show` + cost accounting.**
 
 Status: all eight steps implemented and typecheck-clean. Live-verified via the `claude` runtime:
 single/parallel agents, tools + scoping, lifecycle, coordination tools, reconcile. Not yet
