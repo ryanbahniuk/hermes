@@ -8,8 +8,11 @@ import {
   createSession,
   getSession,
   listSessionMessages,
+  setSessionPid,
   setSessionResumeRef,
+  setSessionStatus,
   setSessionTitle,
+  touchSessionHeartbeat,
   type SessionRow,
 } from "../db";
 import { createPlannerActions } from "./actions";
@@ -22,8 +25,17 @@ import {
 import { plannerScoping } from "./tools";
 import { prompts } from "../prompts";
 
+/**
+ * How often the live process refreshes its heartbeat. `sessionLive` in the TUI
+ * theme treats a session as dead once the heartbeat is a small multiple of this
+ * stale — keep the two in step if you change this.
+ */
+const HEARTBEAT_INTERVAL_MS = 15_000;
+
 /** A live planning conversation bound to one persisted session + one runtime instance. */
 export class PlannerSession {
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
+
   private constructor(
     readonly row: SessionRow,
     readonly model: ResolvedModel,
@@ -43,7 +55,9 @@ export class PlannerSession {
 
     const row = createSession({ plannerModel: ref, runtime: model.runtime });
     const runtime = buildRuntime(config, row.id, ref, model, undefined, undefined);
-    return new PlannerSession(row, model, runtime, false);
+    const session = new PlannerSession(row, model, runtime, false);
+    session.goLive();
+    return session;
   }
 
   /** Reopens an existing session, rehydrating conversation state for its runtime. */
@@ -59,7 +73,31 @@ export class PlannerSession {
       content: m.content,
     }));
     const runtime = buildRuntime(config, sessionId, ref, model, row.resume_ref ?? undefined, history);
-    return new PlannerSession(row, model, runtime, Boolean(row.title));
+    const session = new PlannerSession(row, model, runtime, Boolean(row.title));
+    session.goLive();
+    return session;
+  }
+
+  /**
+   * Attaches this process to the session: stamps our pid, reactivates the row
+   * (reopening a cleanly-closed session makes it live again), and starts the
+   * heartbeat. The timer is unref'd so it never keeps the process alive on its own.
+   */
+  private goLive(): void {
+    setSessionStatus(this.id, "active");
+    setSessionPid(this.id, process.pid);
+    touchSessionHeartbeat(this.id);
+    this.heartbeat = setInterval(() => touchSessionHeartbeat(this.id), HEARTBEAT_INTERVAL_MS);
+    this.heartbeat.unref?.();
+  }
+
+  /** Clean exit: stops the heartbeat and marks the session closed (active→closed). */
+  close(): void {
+    if (this.heartbeat) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = null;
+    }
+    setSessionStatus(this.id, "closed");
   }
 
   /** The stored transcript, for replaying to the terminal on resume. */
@@ -72,6 +110,7 @@ export class PlannerSession {
    * captures the resume handle, rolls up cost, and forwards every event to `onEvent`.
    */
   async sendTurn(text: string, onEvent: (ev: PlannerEvent) => void): Promise<void> {
+    touchSessionHeartbeat(this.id);
     addSessionMessage({ sessionId: this.id, role: "user", content: text });
     if (!this.titled) {
       setSessionTitle(this.id, text.replace(/\s+/g, " ").slice(0, 80));

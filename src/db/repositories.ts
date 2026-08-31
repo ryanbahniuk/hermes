@@ -40,6 +40,10 @@ export interface SessionRow {
   resume_ref: string | null;
   status: SessionStatus;
   cost: number;
+  /** pid of the live interactive process; null until one attaches (see setSessionPid). */
+  pid: number | null;
+  /** Last heartbeat from the live process; null while never attached. Freshness → liveness. */
+  heartbeat_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -300,6 +304,20 @@ export function setSessionStatus(sessionId: string, status: SessionStatus): void
   getDb()
     .prepare(`UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?`)
     .run(status, nowIso(), sessionId);
+}
+
+/** Records the pid of the process driving this session interactively (mirrors setSupervisorPid). */
+export function setSessionPid(sessionId: string, pid: number | null): void {
+  getDb()
+    .prepare(`UPDATE sessions SET pid = ?, updated_at = ? WHERE id = ?`)
+    .run(pid, nowIso(), sessionId);
+}
+
+/** Bumps the session's heartbeat to now — proof the live process is still breathing. */
+export function touchSessionHeartbeat(sessionId: string): void {
+  getDb()
+    .prepare(`UPDATE sessions SET heartbeat_at = ?, updated_at = ? WHERE id = ?`)
+    .run(nowIso(), nowIso(), sessionId);
 }
 
 /**

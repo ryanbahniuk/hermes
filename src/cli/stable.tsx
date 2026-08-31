@@ -43,7 +43,21 @@ function Stable({ config }: { config: TackConfig }): React.ReactElement {
       setMode({ name: "error", message: (err as Error).message });
     }
   };
+  const newSession = () => {
+    try {
+      const session = PlannerSession.start(config);
+      setMode({ name: "chat", session, history: [] });
+    } catch (err) {
+      setMode({ name: "error", message: (err as Error).message });
+    }
+  };
   const back = () => setMode({ name: "dashboard" });
+  // Leaving a chat is a clean exit for that session: stop its heartbeat and mark
+  // it closed so the dashboard stops showing it live. Reopening reactivates it.
+  const leaveChat = (session: PlannerSession) => {
+    session.close();
+    back();
+  };
 
   switch (mode.name) {
     case "dashboard":
@@ -51,11 +65,19 @@ function Stable({ config }: { config: TackConfig }): React.ReactElement {
         <Dashboard
           onOpenSession={openSession}
           onOpenRun={(runId) => setMode({ name: "log", runId })}
+          onNewSession={newSession}
           onQuit={() => exit()}
         />
       );
     case "chat":
-      return <ChatView session={mode.session} history={mode.history} onExit={back} embedded />;
+      return (
+        <ChatView
+          session={mode.session}
+          history={mode.history}
+          onExit={() => leaveChat(mode.session)}
+          embedded
+        />
+      );
     case "log":
       return <LogView runId={mode.runId} onExit={back} />;
     case "error":

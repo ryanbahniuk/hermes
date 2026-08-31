@@ -9,7 +9,7 @@ import {
   type SessionCost,
   type SessionRow,
 } from "../../db";
-import { runLive, usd } from "./theme";
+import { runLive, sessionLive, usd } from "./theme";
 
 // A dashboard row is either a session header or one of its runs, flattened into
 // a single navigable list so a single cursor can walk the whole tree.
@@ -39,15 +39,15 @@ function RowView({ row, selected }: { row: Row; selected: boolean }): React.Reac
 
   if (row.kind === "session") {
     const { session: s, cost } = row;
-    const status = s.status === "active" ? { label: "active", color: "green" } : { label: "closed", color: "gray" };
+    const live = sessionLive(s);
     return (
       <Box>
         {pointer}
-        <Text color={status.color}>●</Text>
+        <Text color={live.color} dimColor={live.dim}>●</Text>
         <Text> </Text>
         <Text bold={selected}>{(s.title ?? "(untitled)").slice(0, 48)}</Text>
         <Text dimColor>
-          {"  " + s.id + "  " + (s.planner_model ?? "-") + "  " + usd(cost.total)}
+          {"  " + s.id + "  " + live.label + "  " + (s.planner_model ?? "-") + "  " + usd(cost.total)}
         </Text>
       </Box>
     );
@@ -74,6 +74,8 @@ export interface DashboardProps {
   onOpenSession: (sessionId: string) => void;
   /** Open the read-only log for a run (Enter on a run row). */
   onOpenRun: (runId: string) => void;
+  /** Start a fresh planning session and drop into its chat (n). */
+  onNewSession: () => void;
   /** Quit the whole app (q). */
   onQuit: () => void;
 }
@@ -83,7 +85,7 @@ export interface DashboardProps {
  * navigable tree. Arrow keys move the cursor; Enter opens the highlighted row —
  * a session into its chat, a run into its read-only log.
  */
-export function Dashboard({ onOpenSession, onOpenRun, onQuit }: DashboardProps): React.ReactElement {
+export function Dashboard({ onOpenSession, onOpenRun, onNewSession, onQuit }: DashboardProps): React.ReactElement {
   const [rows, setRows] = useState<Row[]>(() => buildRows());
   const [cursor, setCursor] = useState(0);
 
@@ -100,6 +102,7 @@ export function Dashboard({ onOpenSession, onOpenRun, onQuit }: DashboardProps):
 
   useInput((input, key) => {
     if (input === "q") return void onQuit();
+    if (input === "n") return void onNewSession();
     if (key.upArrow || input === "k") return void setCursor((c) => Math.max(0, Math.min(c, max) - 1));
     if (key.downArrow || input === "j") return void setCursor((c) => Math.min(max, Math.min(c, max) + 1));
     if (key.return) {
@@ -116,14 +119,16 @@ export function Dashboard({ onOpenSession, onOpenRun, onQuit }: DashboardProps):
       <Text dimColor>every session and its runs · live</Text>
 
       <Box marginTop={1} flexDirection="column">
-        {rows.length === 0 && <Text dimColor>No sessions yet. Start one with `tack session start`.</Text>}
+        {rows.length === 0 && (
+          <Text dimColor>No sessions yet. Press `n` to start one (or run `tack session start`).</Text>
+        )}
         {rows.map((row, i) => (
           <RowView key={row.key} row={row} selected={i === active} />
         ))}
       </Box>
 
       <Box marginTop={1}>
-        <Text dimColor>↑/↓ move · Enter open · q quit</Text>
+        <Text dimColor>↑/↓ move · Enter open · n new session · q quit</Text>
       </Box>
     </Box>
   );

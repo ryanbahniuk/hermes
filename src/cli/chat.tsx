@@ -36,6 +36,7 @@ export async function runChat(
 
   const app = render(<StandaloneChat session={session} history={history} />);
   await app.waitUntilExit();
+  session.close(); // clean exit: stop the heartbeat, mark the session closed
 
   process.stdout.write(
     pc.dim(`\nSession saved: ${session.id}. Resume with \`tack session start --resume ${session.id}\`.\n`),

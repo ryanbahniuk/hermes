@@ -119,6 +119,18 @@ const migrations: Migration[] = [
       CREATE UNIQUE INDEX idx_session_prs_url ON session_prs(session_id, url);
     `,
   },
+  {
+    version: 5,
+    name: "session_liveness",
+    sql: `
+      -- The live interactive process stamps its pid and a periodic heartbeat so
+      -- a killed/crashed session can be told from a genuinely active one, the
+      -- same way runs lean on supervisor_pid. Both nullable (old rows, and tack
+      -- sessions that were never reopened after this migration).
+      ALTER TABLE sessions ADD COLUMN pid INTEGER;
+      ALTER TABLE sessions ADD COLUMN heartbeat_at TEXT;
+    `,
+  },
 ];
 
 /** Applies any pending migrations in a single transaction. */
