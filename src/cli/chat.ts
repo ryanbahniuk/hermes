@@ -13,10 +13,6 @@ function shortJSON(input: unknown): string {
   return s.length > 160 ? `${s.slice(0, 160)}…` : s;
 }
 
-/**
- * Formats one streamed planner event as a single transcript line (no newline),
- * or `null` for event types the REPL does not surface (usage/cost/etc.).
- */
 function formatEvent(ev: PlannerEvent): string | null {
   switch (ev.type) {
     case "text":
@@ -32,11 +28,6 @@ function formatEvent(ev: PlannerEvent): string | null {
   }
 }
 
-/**
- * Builds the streaming callback: each surfaced event is printed through the
- * animation controller so the galloping horse clears its line, the event
- * scrolls up cleanly, and the horse repaints on the fresh bottom line.
- */
 function makePrintEvent(anim: HorseAnimation): (ev: PlannerEvent) => void {
   return (ev) => {
     const line = formatEvent(ev);
