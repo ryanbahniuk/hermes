@@ -6,6 +6,7 @@ import type { PlannerSession } from "../../planner/session";
 import { Horse } from "./Horse";
 import { Prompt } from "./Prompt";
 import { runLive, usd } from "./theme";
+import { createTurnQueue, type TurnQueue } from "./turnQueue";
 
 // ---- transcript model -----------------------------------------------------
 
@@ -157,6 +158,7 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
   const [committed, setCommitted] = useState<Line[]>(initial);
   const [live, setLive] = useState<Line[]>([]);
   const [busy, setBusy] = useState(false);
+  const [queued, setQueued] = useState<string[]>([]);
   const [cost, setCost] = useState<SessionCost>(() => sessionTotalCost(session.id));
 
   useInput((_input, key) => {
@@ -165,23 +167,13 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
 
   const append = (...lines: Line[]) => setCommitted((prev) => [...prev, ...lines]);
 
-  async function handleSubmit(raw: string): Promise<void> {
-    const text = raw.trim();
-    if (!text || busy) return;
-
-    if (text === "/exit" || text === "/quit") return void onExit();
-    if (text === "/help") {
-      append(...HELP.map((t) => ({ id: nextId(), kind: "notice" as const, text: t })));
-      return;
-    }
-    if (text === "/runs") {
-      append(
-        { id: nextId(), kind: "user", text },
-        { id: nextId(), kind: "runs", runs: listRunsBySession(session.id) },
-      );
-      return;
-    }
-
+  // Run exactly one planner turn to completion. Kept in a ref so the queue's
+  // drain loop always calls the latest closure (fresh `session`/setters) rather
+  // than a stale one captured at queue-creation time.
+  const runTurnRef = useRef<(text: string) => Promise<void>>(async () => {});
+  runTurnRef.current = async (text: string) => {
+    // The user line lands in the transcript only when the turn actually starts,
+    // so queued-but-unsent messages stay in the dim "queued" list until then.
     append({ id: nextId(), kind: "user", text });
     setBusy(true);
     const buffer: Line[] = [];
@@ -202,6 +194,39 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
       setCost(c);
       setBusy(false);
     }
+  };
+
+  // One queue for the lifetime of the view: it serializes turns (never two at
+  // once) and auto-drains any messages submitted while a turn was in flight.
+  const queueRef = useRef<TurnQueue | null>(null);
+  if (!queueRef.current) {
+    queueRef.current = createTurnQueue({
+      runTurn: (text) => runTurnRef.current(text),
+      onChange: setQueued,
+    });
+  }
+
+  function handleSubmit(raw: string): void {
+    const text = raw.trim();
+    if (!text) return;
+
+    // Local, read-only slash commands are handled inline and must fire
+    // immediately — even mid-turn — so they are never queued.
+    if (text === "/exit" || text === "/quit") return void onExit();
+    if (text === "/help") {
+      append(...HELP.map((t) => ({ id: nextId(), kind: "notice" as const, text: t })));
+      return;
+    }
+    if (text === "/runs") {
+      append(
+        { id: nextId(), kind: "user", text },
+        { id: nextId(), kind: "runs", runs: listRunsBySession(session.id) },
+      );
+      return;
+    }
+
+    // Everything else becomes a planner turn: enqueue and let the queue drain.
+    queueRef.current!.submit(text);
   }
 
   const footer = embedded
@@ -219,9 +244,16 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
         <Box marginTop={live.length > 0 ? 1 : 0}>
           <Horse running={busy} />
         </Box>
-        {!busy && (
-          <Prompt onSubmit={handleSubmit} isActive placeholder="ask the planner…" />
+        {queued.length > 0 && (
+          <Box flexDirection="column">
+            {queued.map((text, i) => (
+              <Text key={i} dimColor>
+                {"  queued: " + text}
+              </Text>
+            ))}
+          </Box>
         )}
+        <Prompt onSubmit={handleSubmit} isActive placeholder="ask the planner…" />
         <Box marginTop={1}>
           <Text dimColor>{footer}</Text>
         </Box>
