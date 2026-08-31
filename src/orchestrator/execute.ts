@@ -59,6 +59,7 @@ export async function executeTask(
   if (!project) throw new Error(`Unknown project "${task.project_name}" for task ${task.id}`);
   if (!task.model) throw new Error(`task ${task.id} has no model`);
   const prompt = task.prompt ?? "";
+  const sessionId = getRun(task.run_id)?.session_id ?? null;
   const model = preResolved ?? resolveModel(config, task.model);
 
   const logFile = taskLogFile(task.run_id, task.id);
@@ -116,6 +117,7 @@ export async function executeTask(
     for await (const ev of runtime.run({
       taskId: task.id,
       runId: task.run_id,
+      sessionId,
       prompt,
       cwd: worktree.path,
       model,

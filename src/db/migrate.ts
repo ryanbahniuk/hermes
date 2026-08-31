@@ -96,6 +96,29 @@ const migrations: Migration[] = [
       ALTER TABLE runs ADD COLUMN session_id TEXT;
     `,
   },
+  {
+    version: 4,
+    name: "session_prs",
+    sql: `
+      CREATE TABLE session_prs (
+        id           TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        run_id       TEXT,            -- best-effort link to the dispatching run
+        project_name TEXT,            -- config project (repo) the PR lives in
+        number       INTEGER,         -- PR number within its repo
+        url          TEXT NOT NULL,   -- canonical PR URL (its stable identity)
+        title        TEXT,
+        state        TEXT,            -- open | merged | closed
+        head_branch  TEXT,            -- the tack/pr/<session>/… branch it was opened from
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_session_prs_session ON session_prs(session_id);
+      -- Same PR discovered twice updates in place instead of duplicating.
+      CREATE UNIQUE INDEX idx_session_prs_url ON session_prs(session_id, url);
+    `,
+  },
 ];
 
 /** Applies any pending migrations in a single transaction. */

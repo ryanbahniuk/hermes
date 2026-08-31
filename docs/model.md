@@ -152,7 +152,7 @@ Cost is produced at the leaves (tasks) and aggregates upward:
 
 - **Config** (`tack.config.ts`) — the fixed registries: projects, models, read allowlist.
 - **SQLite** (`~/.tack/tack.db`) — sessions + transcripts, runs, tasks, shared context,
-  amendments.
+  amendments, and the PRs each session produced (`session_prs`).
 - **Worktrees** (`~/.tack/worktrees/<run>/<project>`) — where workers make changes; kept for
   you to review and merge.
 - **Logs** (`~/.tack/logs/<run>/`) — per-run / per-task output.
@@ -166,6 +166,7 @@ The CLI is grouped by the three concepts — `session`, `run`, `task` — each w
 | Start / resume the primary interface | `tack` · `tack session start` · `tack session start --resume <id>` |
 | See your conversations | `tack session list` |
 | Inspect a whole conversation | `tack session show <session>` (its run/task tree) |
+| See the PRs a session opened | `tack session prs <session>` · `… --refresh` to rediscover via `gh` |
 | Inspect a batch | `tack run list` · `tack task list <run>` · `tack run show <run>` |
 | Watch work happen | `tack run logs <run> -f` · `tack watch` |
 | Control a batch | `tack run stop <run>` · `tack run retry <run>` |

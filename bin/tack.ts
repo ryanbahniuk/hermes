@@ -48,7 +48,9 @@ import {
   sessionTotalCost,
   setSessionStatus,
   deleteSession,
+  listSessionPrs,
 } from "../src/db";
+import { discoverSessionPrs } from "../src/projects/prs";
 import { spawnSupervisor, isAlive } from "../src/process/spawn";
 import { followLog, readLog, runLogFile, taskLogFile, runLogDir } from "../src/logging/logs";
 import { purgeRunWorktrees } from "../src/worktree/worktree";
@@ -233,6 +235,16 @@ function showRun(runId: string): void {
   }
 }
 
+/** One PR line, colored by state, for the session views. */
+function printPrLine(pr: import("../src/db").SessionPrRow): void {
+  const color = pr.state === "merged" ? pc.magenta : pr.state === "closed" ? pc.red : pc.green;
+  const num = pr.number != null ? `#${pr.number}` : "";
+  const where = pr.project_name ? pc.dim(` (${pr.project_name})`) : "";
+  console.log(
+    `  ${color(`[${pr.state ?? "?"}]`)} ${pc.bold(num)}${where}  ${pr.title ?? ""}\n      ${pc.dim(pr.url)}`,
+  );
+}
+
 /** Prints a session's Session -> Run -> Task tree — the top-down view. */
 function showSession(sessionId: string): void {
   const s = getSession(sessionId);
@@ -244,6 +256,12 @@ function showSession(sessionId: string): void {
     pc.dim(` (plan $${cost.planner.toFixed(4)} + work $${cost.work.toFixed(4)})`));
   console.log(pc.dim(`planner: ${s.planner_model ?? "-"}   created: ${s.created_at}`));
   console.log(`${pc.bold("title:")} ${s.title ?? pc.dim("(untitled)")}`);
+
+  const prs = listSessionPrs(s.id);
+  if (prs.length > 0) {
+    console.log(pc.bold(`\npull requests (${prs.length}):`));
+    for (const pr of prs) printPrLine(pr);
+  }
 
   const runs = listRunsBySession(s.id);
   console.log(pc.bold(`\nruns (${runs.length}):`));
@@ -268,6 +286,7 @@ function showSession(sessionId: string): void {
     }
   }
   console.log(pc.dim(`\n  inspect a run: tack run show <run>`));
+  console.log(pc.dim(`  discover/refresh PRs: tack session prs ${s.id} --refresh`));
 }
 
 const runShow = defineCommand({
@@ -285,6 +304,46 @@ const sessionShow = defineCommand({
   run: action(({ args }: { args: Record<string, unknown> }) => {
     db();
     showSession(String(args.session));
+  }),
+});
+
+const sessionPrs = defineCommand({
+  meta: { name: "prs", description: "List the pull requests a session produced (--refresh to rediscover via gh)" },
+  args: {
+    session: { type: "positional", required: true, description: "session id" },
+    refresh: { type: "boolean", description: "Scan the session's repos with gh to find/refresh PRs" },
+  },
+  run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    db();
+    const sessionId = String(args.session);
+    const s = getSession(sessionId);
+    if (!s) throw new Error(`No such session: ${sessionId}`);
+
+    let prs = listSessionPrs(sessionId);
+    if (args.refresh) {
+      const config = await loadConfig();
+      const result = discoverSessionPrs(config, sessionId);
+      prs = result.prs;
+      if (result.ghMissing) {
+        console.log(pc.yellow("gh CLI not found on PATH — install it to auto-discover PRs."));
+      }
+      for (const sk of result.skipped) {
+        console.log(pc.dim(`  skipped ${sk.project}: ${sk.reason}`));
+      }
+    }
+
+    if (prs.length === 0) {
+      console.log(
+        pc.dim(
+          args.refresh
+            ? "No PRs found for this session."
+            : "No PRs recorded yet. Run with --refresh to scan the session's repos.",
+        ),
+      );
+      return;
+    }
+    console.log(pc.bold(`pull requests (${prs.length}):`));
+    for (const pr of prs) printPrLine(pr);
   }),
 });
 
@@ -1267,7 +1326,7 @@ const superviseCmd = defineCommand({
 // config registries.
 const session = defineCommand({
   meta: { name: "session", description: "Planning sessions — the primary interface" },
-  subCommands: { start: sessionStart, list: sessionList, show: sessionShow, kill: sessionKill, delete: sessionDelete },
+  subCommands: { start: sessionStart, list: sessionList, show: sessionShow, prs: sessionPrs, kill: sessionKill, delete: sessionDelete },
 });
 
 const run = defineCommand({

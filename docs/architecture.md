@@ -42,7 +42,7 @@ foundation model can be an agent, Anthropic or not.
 | Agent runtime (Anthropic models) | **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`) | reuses its tools, permissions, subagents, session resume |
 | Agent runtime (non-Anthropic models) | **LangGraph TS** `createReactAgent` + **`@langchain/aws` `ChatBedrockConverse`** | our tools + SQLite checkpointer |
 | Runtime selection | **`AgentRuntime` interface** | supervisor picks per task from the model registry |
-| Persistence (run state) | **`bun:sqlite`** | our tables: runs, tasks, shared_context, amendments |
+| Persistence (run state) | **`bun:sqlite`** | our tables: runs, tasks, shared_context, amendments, sessions, session_messages, session_prs |
 | Persistence (agent state) | **per-runtime** | SDK sessions (`claude`) / LangGraph checkpointer over `bun:sqlite` (`tack`) |
 
 > **Reversal (implementation):** we originally chose `better-sqlite3` everywhere so the
@@ -360,6 +360,19 @@ session_messages            -- persisted transcript, for resume + replay
   role          text        -- user | assistant
   content       text
   created_at
+
+session_prs                 -- PRs a session produced (one-to-many off sessions)
+  id            text  pk
+  session_id    text  fk -> sessions.id  (ON DELETE CASCADE)
+  run_id        text        -- best-effort link to the dispatching run
+  project_name  text        -- config project (repo) the PR lives in
+  number        integer     -- PR number within its repo
+  url           text        -- canonical PR URL (stable identity)
+  title         text
+  state         text        -- open | merged | closed
+  head_branch   text        -- the tack/pr/<session>/… branch it came from
+  created_at, updated_at
+  unique (session_id, url)   -- rediscovery upserts in place, never duplicates
 
 runs.session_id  text       -- nullable; links a delegated swarm back to its session
 

@@ -9,6 +9,7 @@ import {
 import { createChatModel } from "../models/chat";
 import { createTackTools } from "../tools/tack-tools";
 import { createTackCoordinationTools } from "../tools/coordination";
+import { prBranchInstruction } from "../worktree/worktree";
 import type { AgentEvent, AgentRuntime, AgentTask } from "./types";
 
 export function contentToText(content: unknown): string {
@@ -42,6 +43,8 @@ function systemPrompt(task: AgentTask): string {
       "If you believe the contract is wrong, call propose_amendment (sparingly); otherwise conform.",
     );
   }
+  const pr = prBranchInstruction(task.sessionId);
+  if (pr) lines.push(pr);
   return lines.join("\n");
 }
 

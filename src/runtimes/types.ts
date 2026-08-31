@@ -13,6 +13,8 @@ export interface Coordination {
 export interface AgentTask {
   taskId: string;
   runId: string;
+  /** The session that dispatched this task, if any — drives PR branch naming. */
+  sessionId?: string | null;
   prompt: string;
   cwd: string;
   model: ResolvedModel;

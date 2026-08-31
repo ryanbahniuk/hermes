@@ -10,6 +10,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { assertReadable, assertWritable, type Scoping } from "../tools/ops";
+import { prBranchInstruction } from "../worktree/worktree";
 import { defaultRegion } from "../models/chat";
 import type { ResolvedModel } from "../models/registry";
 import { createClaudeCoordinationServer } from "../tools/coordination";
@@ -112,6 +113,8 @@ function systemAppend(task: AgentTask): string {
       "is wrong, call mcp__tack__propose_amendment (sparingly); otherwise conform.",
     );
   }
+  const pr = prBranchInstruction(task.sessionId);
+  if (pr) lines.push(pr);
   return lines.join("\n");
 }
 

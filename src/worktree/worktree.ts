@@ -22,6 +22,47 @@ export function worktreesRoot(runId: string): string {
 }
 
 /**
+ * The standardized head-branch nomenclature for PRs a worker opens on behalf of
+ * a session: `tack/pr/<sessionId>/<slug>`. Encoding the session id in the branch
+ * is what lets us later discover a PR and associate it back to its session
+ * (see `src/projects/prs.ts`). Distinct `tack/pr/` prefix keeps these from
+ * colliding with the internal `tack/<run>/<project>` worktree branches.
+ */
+export const SESSION_PR_BRANCH_PREFIX = "tack/pr";
+
+/** Builds a session PR branch name; `slug` is sanitized to a git-safe segment. */
+export function sessionPrBranch(sessionId: string, slug: string): string {
+  const safe = slug.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "change";
+  return `${SESSION_PR_BRANCH_PREFIX}/${sessionId}/${safe}`;
+}
+
+/**
+ * The worker-prompt guidance telling an agent how to name a PR branch so the PR
+ * can be discovered and tied back to its session. Returns empty when the task
+ * has no session (e.g. a direct `tack run`) — nothing to associate to.
+ */
+export function prBranchInstruction(sessionId: string | null | undefined): string {
+  if (!sessionId) return "";
+  return [
+    "",
+    "Opening a pull request (only if the task asks you to):",
+    `If you open a PR, first create a branch named "${sessionPrBranch(sessionId, "<short-slug>")}"`,
+    "(replace <short-slug> with a few kebab-case words describing the change), then push it and",
+    "open the PR from that branch. This exact branch nomenclature is required — it is how Tack",
+    "discovers the PR and associates it with this session. Do not open a PR unless instructed to.",
+  ].join("\n");
+}
+
+/** Extracts the session id from a PR branch, or null if it isn't one of ours. */
+export function sessionIdFromPrBranch(branch: string): string | null {
+  const prefix = `${SESSION_PR_BRANCH_PREFIX}/`;
+  if (!branch.startsWith(prefix)) return null;
+  const rest = branch.slice(prefix.length);
+  const sessionId = rest.split("/")[0];
+  return sessionId || null;
+}
+
+/**
  * Guards against a misconfigured project path: `git` commands walk up to any
  * ancestor repo, so we require the path to BE a git repository root.
  */

@@ -361,6 +361,77 @@ export function deleteSession(sessionId: string): void {
   })();
 }
 
+// ---- session PRs ----------------------------------------------------------
+
+export interface SessionPrRow {
+  id: string;
+  session_id: string;
+  run_id: string | null;
+  project_name: string | null;
+  number: number | null;
+  url: string;
+  title: string | null;
+  state: string | null;
+  head_branch: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Records (or refreshes) a PR discovered for a session, keyed on `(session_id,
+ * url)` so re-running discovery updates the row in place — its state/title stay
+ * current — rather than piling up duplicates. Returns the stored row.
+ */
+export function upsertSessionPr(input: {
+  sessionId: string;
+  url: string;
+  runId?: string | null;
+  projectName?: string | null;
+  number?: number | null;
+  title?: string | null;
+  state?: string | null;
+  headBranch?: string | null;
+}): SessionPrRow {
+  const now = nowIso();
+  getDb()
+    .prepare(
+      `INSERT INTO session_prs
+         (id, session_id, run_id, project_name, number, url, title, state, head_branch, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id, url) DO UPDATE SET
+         run_id       = COALESCE(excluded.run_id, session_prs.run_id),
+         project_name = COALESCE(excluded.project_name, session_prs.project_name),
+         number       = COALESCE(excluded.number, session_prs.number),
+         title        = COALESCE(excluded.title, session_prs.title),
+         state        = COALESCE(excluded.state, session_prs.state),
+         head_branch  = COALESCE(excluded.head_branch, session_prs.head_branch),
+         updated_at   = excluded.updated_at`,
+    )
+    .run(
+      id("pr"),
+      input.sessionId,
+      input.runId ?? null,
+      input.projectName ?? null,
+      input.number ?? null,
+      input.url,
+      input.title ?? null,
+      input.state ?? null,
+      input.headBranch ?? null,
+      now,
+      now,
+    );
+  return getDb()
+    .prepare(`SELECT * FROM session_prs WHERE session_id = ? AND url = ?`)
+    .get(input.sessionId, input.url) as SessionPrRow;
+}
+
+/** PRs recorded for a session, newest first. */
+export function listSessionPrs(sessionId: string): SessionPrRow[] {
+  return getDb()
+    .prepare(`SELECT * FROM session_prs WHERE session_id = ? ORDER BY created_at DESC`)
+    .all(sessionId) as SessionPrRow[];
+}
+
 export function addSessionMessage(input: {
   sessionId: string;
   role: "user" | "assistant";
