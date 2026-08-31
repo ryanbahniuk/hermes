@@ -3,9 +3,8 @@ import { Box, Text } from "ink";
 
 // Two gaits: while idle the horse grazes in place; while work is loading it
 // breaks into a gallop that canters across the line via a bobbing offset, with
-// a rotating caption alongside.
+// a single caption chosen when the gallop starts.
 const FRAME_MS = 160;
-const CAPTION_MS = 1700;
 
 // Head down, mid-stride — used while loading.
 const GALLOP = [
@@ -28,7 +27,9 @@ const GRAZE = [
 
 const OFFSETS = [0, 1, 2, 3, 2, 1];
 
-const CAPTIONS = [
+// One is chosen at random each time the horse breaks into a gallop; exported so
+// tests can assert the roster's size and tone.
+export const CAPTIONS = [
   "wranglin' workers…",
   "saddlin' up…",
   "roundin' up the herd…",
@@ -36,12 +37,38 @@ const CAPTIONS = [
   "headin' to town…",
   "hitchin' the wagon…",
   "kickin' up dust…",
+  "brandin' the calves…",
+  "mendin' the fences…",
+  "waterin' the horses…",
+  "lassoin' strays…",
+  "crossin' the river…",
+  "ridin' the range…",
+  "chasin' the sunset…",
+  "spurrin' onward…",
+  "trailin' the herd…",
+  "breakin' broncos…",
+  "cinchin' the saddle…",
+  "loadin' the six-shooter…",
+  "wettin' the whistle…",
+  "polishin' the boots…",
+  "tippin' the ten-gallon…",
+  "wanderin' the prairie…",
+  "corralin' the cattle…",
+  "shoein' the mare…",
+  "diggin' for gold…",
+  "pannin' the creek…",
+  "settlin' the frontier…",
+  "rustlin' up grub…",
+  "stokin' the campfire…",
+  "whittlin' by the fire…",
+  "moseyin' along…",
 ];
 
 /**
  * A horse that grazes while idle and gallops while loading.
- * @param running when true, the horse gallops with a rotating caption; when
- *   false it stands and grazes.
+ * @param running when true, the horse gallops with a single caption chosen when
+ *   the gallop starts; when false it stands and grazes.
+ * @param caption when supplied, overrides the random caption for the gallop.
  */
 export function Horse({
   running = true,
@@ -51,19 +78,18 @@ export function Horse({
   caption?: string;
 }): React.ReactElement {
   const [frame, setFrame] = useState(0);
-  const [captionIdx, setCaptionIdx] = useState(0);
+  // Index into CAPTIONS, re-rolled each time the horse breaks into a gallop.
+  const [captionIdx, setCaptionIdx] = useState(() =>
+    Math.floor(Math.random() * CAPTIONS.length),
+  );
 
   useEffect(() => {
     if (!running) return; // grazing is still; no per-frame animation needed
+    // Pick one caption for the whole gallop (unless overridden by the prop).
+    setCaptionIdx(Math.floor(Math.random() * CAPTIONS.length));
     const timer = setInterval(() => setFrame((f) => f + 1), FRAME_MS);
     return () => clearInterval(timer);
   }, [running]);
-
-  useEffect(() => {
-    if (!running || caption) return; // idle, or a fixed caption was supplied
-    const timer = setInterval(() => setCaptionIdx((i) => i + 1), CAPTION_MS);
-    return () => clearInterval(timer);
-  }, [running, caption]);
 
   if (!running) {
     return (
@@ -81,7 +107,7 @@ export function Horse({
   }
 
   const pad = " ".repeat(OFFSETS[frame % OFFSETS.length]);
-  const text = caption ?? CAPTIONS[captionIdx % CAPTIONS.length];
+  const text = caption ?? CAPTIONS[captionIdx];
 
   return (
     <Box flexDirection="column">

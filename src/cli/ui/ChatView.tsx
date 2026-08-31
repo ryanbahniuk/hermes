@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Static, Text, useInput } from "ink";
 import { listRunsBySession, sessionTotalCost, type RunRow, type SessionCost } from "../../db";
 import type { PlannerEvent } from "../../planner/runtime";
@@ -158,6 +158,22 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
   const [live, setLive] = useState<Line[]>([]);
   const [busy, setBusy] = useState(false);
   const [cost, setCost] = useState<SessionCost>(() => sessionTotalCost(session.id));
+  const [workersRunning, setWorkersRunning] = useState(false);
+
+  // Background worker runs mutate the DB out of band, so the gallop can't be
+  // driven off local turn state — it must reflect whether any dispatched run is
+  // still live. Poll the runs table and re-render as runs start and finish.
+  useEffect(() => {
+    const check = () => {
+      const active = listRunsBySession(session.id).some(
+        (r) => r.status !== "done" && r.status !== "failed" && r.status !== "stopped",
+      );
+      setWorkersRunning(active);
+    };
+    check();
+    const timer = setInterval(check, 1000);
+    return () => clearInterval(timer);
+  }, [session.id]);
 
   useInput((_input, key) => {
     if (key.escape && !busy) onExit();
@@ -217,7 +233,7 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
           <LineView key={line.id} line={line} />
         ))}
         <Box marginTop={live.length > 0 ? 1 : 0}>
-          <Horse running={busy} />
+          <Horse running={workersRunning} />
         </Box>
         {!busy && (
           <Prompt onSubmit={handleSubmit} isActive placeholder="ask the planner…" />
