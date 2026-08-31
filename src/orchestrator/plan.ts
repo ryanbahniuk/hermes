@@ -3,6 +3,7 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { createChatModel } from "../models/chat";
 import type { TackConfig } from "../config/schema";
 import type { ResolvedModel } from "../models/registry";
+import { prompts } from "../prompts";
 
 const PlanSchema = z.object({
   sharedContext: z
@@ -29,17 +30,6 @@ export interface PlanResult {
   selections: Selection[];
 }
 
-const SYSTEM = [
-  "You are the planner for Tack, a multi-repo development harness.",
-  "Given a problem and a list of locally available projects (name + description):",
-  "1. Select ONLY the projects relevant to the problem (choose exclusively from the listed names).",
-  "2. Write a focused, self-contained subtask for each selected project's agent.",
-  "3. Author a shared context: the cross-project contract (agreed interfaces, naming, shapes)",
-  "   that every selected agent must conform to so their independent changes stay consistent.",
-  "If nothing is relevant, return an empty selection. If the work is fully independent,",
-  "the shared context may be an empty string.",
-].join("\n");
-
 /**
  * Runs the planner: selects relevant projects and drafts a per-project subtask.
  * Uses the Bedrock Converse API directly (structured output) — no tools needed.
@@ -61,7 +51,7 @@ export async function plan(
 
   const projectList = config.projects.map((p) => `- ${p.name}: ${p.description}`).join("\n");
   const result = await structured.invoke([
-    new SystemMessage(SYSTEM),
+    new SystemMessage(prompts.orchestratorPlan),
     new HumanMessage(`Problem:\n${problem}\n\nAvailable projects:\n${projectList}`),
   ]);
 

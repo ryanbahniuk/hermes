@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { TACK_HOME } from "../paths";
+import { render, templates } from "../prompts";
 
 export interface Worktree {
   repo: string;
@@ -43,14 +44,9 @@ export function sessionPrBranch(sessionId: string, slug: string): string {
  */
 export function prBranchInstruction(sessionId: string | null | undefined): string {
   if (!sessionId) return "";
-  return [
-    "",
-    "Opening a pull request (only if the task asks you to):",
-    `If you open a PR, first create a branch named "${sessionPrBranch(sessionId, "<short-slug>")}"`,
-    "(replace <short-slug> with a few kebab-case words describing the change), then push it and",
-    "open the PR from that branch. This exact branch nomenclature is required — it is how Tack",
-    "discovers the PR and associates it with this session. Do not open a PR unless instructed to.",
-  ].join("\n");
+  // render() preserves the leading blank line (separator from the base prompt)
+  // and trims the trailing newline, matching the previous joined-string form.
+  return render(templates.prBranch, { branch: sessionPrBranch(sessionId, "<short-slug>") });
 }
 
 /** Extracts the session id from a PR branch, or null if it isn't one of ours. */

@@ -11,6 +11,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { assertReadable, assertWritable, type Scoping } from "../tools/ops";
 import { prBranchInstruction } from "../worktree/worktree";
+import { render, templates } from "../prompts";
 import { defaultRegion } from "../models/chat";
 import type { ResolvedModel } from "../models/registry";
 import { createClaudeCoordinationServer } from "../tools/coordination";
@@ -95,27 +96,12 @@ function modelId(task: AgentTask): string {
 }
 
 function systemAppend(task: AgentTask): string {
-  const allow = task.scoping.readAllowlist.join(", ") || "(none)";
-  const lines = [
-    "",
-    "You are running as a Tack implementation agent in an isolated git worktree.",
-    `Worktree (your working directory): ${task.scoping.worktree}`,
-    `Additional read-only directories: ${allow}`,
-    "Write and edit files only inside the worktree. Finish with a concise summary of your changes.",
-  ];
-  if (task.sharedContext.trim()) {
-    lines.push(
-      "",
-      "Shared coordination context (the cross-project contract — conform to it):",
-      task.sharedContext,
-      "",
-      "Use the mcp__tack__read_shared_context tool to re-read it. If you believe the contract",
-      "is wrong, call mcp__tack__propose_amendment (sparingly); otherwise conform.",
-    );
-  }
-  const pr = prBranchInstruction(task.sessionId);
-  if (pr) lines.push(pr);
-  return lines.join("\n");
+  return render(templates.workerClaude, {
+    worktree: task.scoping.worktree,
+    readAllowlist: task.scoping.readAllowlist.join(", ") || "(none)",
+    sharedContext: task.sharedContext,
+    prBranch: prBranchInstruction(task.sessionId),
+  });
 }
 
 /** The `claude` runtime: wraps the Claude Agent SDK, on Bedrock or the Anthropic API. */

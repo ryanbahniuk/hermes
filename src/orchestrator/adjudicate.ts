@@ -2,6 +2,7 @@ import { z } from "zod";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { createChatModel } from "../models/chat";
 import type { ResolvedModel } from "../models/registry";
+import { prompts } from "../prompts";
 
 const VerdictSchema = z.object({
   decision: z.enum(["accept", "reject"]),
@@ -17,14 +18,6 @@ export interface Verdict {
   reason: string;
   updatedContext?: string;
 }
-
-const SYSTEM = [
-  "You are the coordinator/adjudicator for Tack, a multi-repo development harness.",
-  "An implementation agent has proposed an amendment to the shared cross-project contract.",
-  "Trust the existing contract by DEFAULT — reject unless the proposal is clearly justified",
-  "and materially improves cross-project consistency or correctness.",
-  "If you accept, return the FULL revised shared context (not just the delta).",
-].join("\n");
 
 /**
  * Adjudicates an amendment proposal with a powerful model (planner-authoritative).
@@ -43,7 +36,7 @@ export async function adjudicate(
   });
 
   return structured.invoke([
-    new SystemMessage(SYSTEM),
+    new SystemMessage(prompts.adjudicate),
     new HumanMessage(
       `Problem:\n${input.problem}\n\n` +
         `Current shared context:\n${input.currentContext || "(empty)"}\n\n` +

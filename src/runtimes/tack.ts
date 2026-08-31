@@ -10,6 +10,7 @@ import { createChatModel } from "../models/chat";
 import { createTackTools } from "../tools/tack-tools";
 import { createTackCoordinationTools } from "../tools/coordination";
 import { prBranchInstruction } from "../worktree/worktree";
+import { render, templates } from "../prompts";
 import type { AgentEvent, AgentRuntime, AgentTask } from "./types";
 
 export function contentToText(content: unknown): string {
@@ -23,29 +24,12 @@ export function contentToText(content: unknown): string {
 }
 
 function systemPrompt(task: AgentTask): string {
-  const allow = task.scoping.readAllowlist.join(", ") || "(none)";
-  const lines = [
-    "You are a Tack implementation agent working in an isolated git worktree.",
-    "",
-    `Working directory (your worktree): ${task.scoping.worktree}`,
-    `Read-only directories you may also read: ${allow}`,
-    "You may write and edit files ONLY inside the worktree.",
-    "",
-    "Use the tools to inspect and modify the code, then finish with a concise",
-    "summary of what you changed. Work autonomously toward the task.",
-  ];
-  if (task.sharedContext.trim()) {
-    lines.push(
-      "",
-      "Shared coordination context (the cross-project contract — conform to it):",
-      task.sharedContext,
-      "",
-      "If you believe the contract is wrong, call propose_amendment (sparingly); otherwise conform.",
-    );
-  }
-  const pr = prBranchInstruction(task.sessionId);
-  if (pr) lines.push(pr);
-  return lines.join("\n");
+  return render(templates.workerTack, {
+    worktree: task.scoping.worktree,
+    readAllowlist: task.scoping.readAllowlist.join(", ") || "(none)",
+    sharedContext: task.sharedContext,
+    prBranch: prBranchInstruction(task.sessionId),
+  });
 }
 
 /** The `tack` runtime: a LangGraph react agent over Bedrock Converse. */
