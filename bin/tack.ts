@@ -48,7 +48,13 @@ import {
   sessionTotalCost,
   listSessionPrs,
 } from "../src/db";
-import { killSession, deleteSession, stopRun } from "../src/sessions/actions";
+import {
+  killSession,
+  deleteSession,
+  stopRun,
+  archiveSession,
+  unarchiveSession,
+} from "../src/sessions/actions";
 import { discoverSessionPrs } from "../src/projects/prs";
 import { spawnSupervisor, isAlive } from "../src/process/spawn";
 import { followLog, readLog, runLogFile, taskLogFile } from "../src/logging/logs";
@@ -105,13 +111,26 @@ const sessionStart = defineCommand({
 });
 
 const sessionList = defineCommand({
-  meta: { name: "list", description: "List planning sessions" },
-  run: action(() => {
+  meta: { name: "list", description: "List planning sessions (archived hidden unless --archived)" },
+  args: {
+    archived: {
+      type: "boolean",
+      alias: "all",
+      default: false,
+      description: "Include archived (soft-hidden) sessions",
+    },
+  },
+  run: action(({ args }: { args: Record<string, unknown> }) => {
     db();
-    const rows = listSessions();
+    const rows = listSessions({ includeArchived: Boolean(args.archived) });
     if (rows.length === 0) return void console.log(pc.dim("No sessions yet. Start one with `tack session start`."));
     for (const s of rows) {
-      const live = s.status === "active" ? pc.green("active") : pc.dim("closed");
+      const live =
+        s.status === "active"
+          ? pc.green("active")
+          : s.status === "archived"
+            ? pc.dim("archived")
+            : pc.dim("closed");
       const cost = sessionTotalCost(s.id);
       console.log(
         `${pc.bold(s.id)}  ${live}  ${pc.dim(`$${cost.total.toFixed(4)}`)}` +
@@ -247,7 +266,12 @@ function showSession(sessionId: string): void {
   const s = getSession(sessionId);
   if (!s) throw new Error(`No such session: ${sessionId}`);
 
-  const live = s.status === "active" ? pc.green("active") : pc.dim("closed");
+  const live =
+    s.status === "active"
+      ? pc.green("active")
+      : s.status === "archived"
+        ? pc.dim("archived")
+        : pc.dim("closed");
   const cost = sessionTotalCost(s.id);
   console.log(`${pc.bold(s.id)}  ${live}  ${pc.dim(`$${cost.total.toFixed(4)}`)}` +
     pc.dim(` (plan $${cost.planner.toFixed(4)} + work $${cost.work.toFixed(4)})`));
@@ -384,6 +408,39 @@ const sessionDelete = defineCommand({
 
     console.log(pc.green(`Deleted session ${pc.bold(s.id)}`) + pc.dim(`  (${runs} run${runs === 1 ? "" : "s"} removed)`));
     if (stopped > 0) console.log(pc.dim(`  stopped ${stopped} live run supervisor${stopped === 1 ? "" : "s"}`));
+  }),
+});
+
+const sessionArchive = defineCommand({
+  meta: {
+    name: "archive",
+    description: "Archive a session: soft-hide it while keeping all its data (requires every run finished)",
+  },
+  args: { session: { type: "positional", required: true, description: "session id" } },
+  run: action(({ args }: { args: Record<string, unknown> }) => {
+    db();
+    const s = getSession(String(args.session));
+    if (!s) throw new Error(`No such session: ${args.session}`);
+    // Throws (with the offending runs named) if any run is still non-terminal;
+    // the `action` wrapper prints that as one clean red line and exits 1.
+    archiveSession(s.id);
+    console.log(
+      pc.green(`Archived session ${pc.bold(s.id)}`) +
+        pc.dim("  (hidden from listings; reveal with `tack session list --archived`)"),
+    );
+    console.log(pc.dim(`  restore it with: tack session unarchive ${s.id}`));
+  }),
+});
+
+const sessionUnarchive = defineCommand({
+  meta: { name: "unarchive", description: "Restore an archived session (flips it back to closed)" },
+  args: { session: { type: "positional", required: true, description: "session id" } },
+  run: action(({ args }: { args: Record<string, unknown> }) => {
+    db();
+    const s = getSession(String(args.session));
+    if (!s) throw new Error(`No such session: ${args.session}`);
+    unarchiveSession(s.id);
+    console.log(pc.green(`Unarchived session ${pc.bold(s.id)}`) + pc.dim("  (restored to closed)"));
   }),
 });
 
@@ -1290,7 +1347,16 @@ const superviseCmd = defineCommand({
 // config registries.
 const session = defineCommand({
   meta: { name: "session", description: "Planning sessions — the primary interface" },
-  subCommands: { start: sessionStart, list: sessionList, show: sessionShow, prs: sessionPrs, kill: sessionKill, delete: sessionDelete },
+  subCommands: {
+    start: sessionStart,
+    list: sessionList,
+    show: sessionShow,
+    prs: sessionPrs,
+    kill: sessionKill,
+    archive: sessionArchive,
+    unarchive: sessionUnarchive,
+    delete: sessionDelete,
+  },
 });
 
 const run = defineCommand({

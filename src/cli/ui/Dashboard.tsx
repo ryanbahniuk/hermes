@@ -10,7 +10,14 @@ import {
   type SessionCost,
   type SessionRow,
 } from "../../db";
-import { deleteSession, killSession, stopRun } from "../../sessions/actions";
+import {
+  allRunsTerminal,
+  archiveSession,
+  deleteSession,
+  killSession,
+  stopRun,
+  unarchiveSession,
+} from "../../sessions/actions";
 import {
   actionHint,
   runActions,
@@ -24,14 +31,28 @@ import {
 // A dashboard row is either a session header or one of its runs, flattened into
 // a single navigable list so a single cursor can walk the whole tree.
 type Row =
-  | { key: string; kind: "session"; session: SessionRow; cost: SessionCost }
+  | {
+      key: string;
+      kind: "session";
+      session: SessionRow;
+      cost: SessionCost;
+      /** Every run terminal → archive is eligible. Computed here so it's the one source. */
+      allRunsTerminal: boolean;
+    }
   | { key: string; kind: "run"; run: RunRow; taskCount: number };
 
-function buildRows(): Row[] {
+function buildRows(showArchived: boolean): Row[] {
   const rows: Row[] = [];
-  for (const s of listSessions()) {
-    rows.push({ key: `s:${s.id}`, kind: "session", session: s, cost: sessionTotalCost(s.id) });
-    for (const r of listRunsBySession(s.id)) {
+  for (const s of listSessions({ includeArchived: showArchived })) {
+    const runs = listRunsBySession(s.id);
+    rows.push({
+      key: `s:${s.id}`,
+      kind: "session",
+      session: s,
+      cost: sessionTotalCost(s.id),
+      allRunsTerminal: allRunsTerminal(runs),
+    });
+    for (const r of runs) {
       rows.push({ key: `r:${r.id}`, kind: "run", run: r, taskCount: listTasks(r.id).length });
     }
   }
@@ -44,7 +65,9 @@ function buildRows(): Row[] {
  * so an offered affordance can never diverge from what the key actually does.
  */
 function actionsFor(row: Row): RowAction[] {
-  return row.kind === "session" ? sessionActions(row.session) : runActions(row.run);
+  return row.kind === "session"
+    ? sessionActions(row.session, row.allRunsTerminal)
+    : runActions(row.run);
 }
 
 function RowView({ row, selected }: { row: Row; selected: boolean }): React.ReactElement {
@@ -59,7 +82,7 @@ function RowView({ row, selected }: { row: Row; selected: boolean }): React.Reac
   if (row.kind === "session") {
     const { session: s, cost } = row;
     const live = sessionLive(s);
-    const actions = sessionActions(s);
+    const actions = sessionActions(s, row.allRunsTerminal);
     return (
       <Box>
         {pointer}
@@ -116,7 +139,9 @@ export interface DashboardProps {
  * navigable tree. Arrow keys move the cursor; Enter opens the highlighted row —
  * a session into its chat, a run into its read-only log. Destructive actions fire
  * immediately on the highlighted row (no confirmation): `x` kills a session or
- * stops a run, `d` permanently deletes a session.
+ * stops a run, `a` archives a finished session (all runs terminal), `u` unarchives
+ * a revealed archived session, `d` permanently deletes a session. Archived sessions
+ * are hidden by default; `z` toggles them into/out of the tree.
  */
 export function Dashboard({
   config,
@@ -125,15 +150,18 @@ export function Dashboard({
   onNewSession,
   onQuit,
 }: DashboardProps): React.ReactElement {
-  const [rows, setRows] = useState<Row[]>(() => buildRows());
+  // Archived sessions are soft-hidden; `z` reveals them (getSession by id still
+  // works regardless). The build + poll below key off this so toggling is live.
+  const [showArchived, setShowArchived] = useState(false);
+  const [rows, setRows] = useState<Row[]>(() => buildRows(false));
   const [cursor, setCursor] = useState(0);
 
   useEffect(() => {
-    const tick = () => setRows(buildRows());
+    const tick = () => setRows(buildRows(showArchived));
     tick();
     const interval = setInterval(tick, 500);
     return () => clearInterval(interval);
-  }, []);
+  }, [showArchived]);
 
   // Keep the cursor in range as rows appear and disappear under it.
   const max = Math.max(0, rows.length - 1);
@@ -143,6 +171,8 @@ export function Dashboard({
   useInput((input, key) => {
     if (input === "q") return void onQuit();
     if (input === "n") return void onNewSession();
+    // Reveal/hide archived sessions — a view toggle, not a row action.
+    if (input === "z") return void setShowArchived((v) => !v);
     if (key.upArrow || input === "k") return void setCursor((c) => Math.max(0, Math.min(c, max) - 1));
     if (key.downArrow || input === "j") return void setCursor((c) => Math.min(max, Math.min(c, max) + 1));
     if (key.return) {
@@ -162,14 +192,31 @@ export function Dashboard({
       if (!actionsFor(row).some((a) => a.key === "x")) return;
       if (row.kind === "session") killSession(row.session.id);
       else stopRun(row.run);
-      return void setRows(buildRows());
+      return void setRows(buildRows(showArchived));
+    }
+    if (input === "a") {
+      const row = rows[active];
+      // Archive is session-only, and only when offered (all runs terminal, not
+      // already archived) — inert otherwise, so a stray `a` can't force it.
+      if (!row || row.kind !== "session") return;
+      if (!actionsFor(row).some((x) => x.key === "a")) return;
+      archiveSession(row.session.id);
+      return void setRows(buildRows(showArchived));
+    }
+    if (input === "u") {
+      const row = rows[active];
+      // Unarchive only applies to a revealed archived session.
+      if (!row || row.kind !== "session") return;
+      if (!actionsFor(row).some((x) => x.key === "u")) return;
+      unarchiveSession(row.session.id);
+      return void setRows(buildRows(showArchived));
     }
     if (input === "d") {
       const row = rows[active];
       // Delete is session-only — a run row has no delete action.
       if (!row || row.kind !== "session") return;
       deleteSession(row.session.id, config);
-      return void setRows(buildRows());
+      return void setRows(buildRows(showArchived));
     }
   });
 
@@ -182,6 +229,7 @@ export function Dashboard({
     "Enter open",
     "n new session",
     ...(actionHelp ? [actionHelp] : []),
+    `z ${showArchived ? "hide" : "show"} archived`,
     "q quit",
   ].join(" · ");
 

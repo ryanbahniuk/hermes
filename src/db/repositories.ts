@@ -22,7 +22,11 @@ export type TaskStatus =
   | "done"
   | "failed";
 
-export type SessionStatus = "active" | "closed";
+// `archived` is a soft, reversible hidden state that supersedes/implies `closed`
+// for display: all the session's DB records are kept (unlike a delete), it's just
+// hidden from the default listings. The column is plain TEXT (no CHECK), so adding
+// the value needs no SQL migration. See archiveSession/unarchiveSession.
+export type SessionStatus = "active" | "closed" | "archived";
 
 export interface RunRow {
   id: string;
@@ -288,8 +292,18 @@ export function getSession(sessionId: string): SessionRow | undefined {
     | undefined;
 }
 
-export function listSessions(): SessionRow[] {
-  return getDb().prepare(`SELECT * FROM sessions ORDER BY updated_at DESC`).all() as SessionRow[];
+/**
+ * Sessions newest-updated first. Archived sessions are hidden by default (they're
+ * a soft, reversible state) — pass `{ includeArchived: true }` to reveal them.
+ * `getSession` by id is unaffected, so a direct lookup always resolves.
+ */
+export function listSessions(opts?: { includeArchived?: boolean }): SessionRow[] {
+  const db = getDb();
+  return opts?.includeArchived
+    ? (db.prepare(`SELECT * FROM sessions ORDER BY updated_at DESC`).all() as SessionRow[])
+    : (db
+        .prepare(`SELECT * FROM sessions WHERE status != 'archived' ORDER BY updated_at DESC`)
+        .all() as SessionRow[]);
 }
 
 export function setSessionResumeRef(sessionId: string, ref: string): void {

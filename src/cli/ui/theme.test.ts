@@ -45,6 +45,15 @@ describe("sessionLive", () => {
     expect(live.color).toBe("gray");
   });
 
+  test("archived sessions read archived (gray, dim), regardless of pid/heartbeat", () => {
+    const live = sessionLive(
+      row({ status: "archived", pid: process.pid, heartbeat_at: new Date().toISOString() }),
+    );
+    expect(live.label).toBe("archived");
+    expect(live.color).toBe("gray");
+    expect(live.dim).toBe(true);
+  });
+
   test("live process with a fresh heartbeat is active", () => {
     const live = sessionLive(row({ pid: process.pid, heartbeat_at: new Date().toISOString() }));
     expect(live.label).toBe("active");
@@ -125,25 +134,40 @@ describe("runActions", () => {
 });
 
 describe("sessionActions", () => {
-  const keys = (s: SessionRow) => sessionActions(s).map((a) => a.key);
+  const fresh = { pid: process.pid, heartbeat_at: new Date().toISOString() };
+  const keys = (s: SessionRow, allTerminal: boolean) =>
+    sessionActions(s, allTerminal).map((a) => a.key);
 
-  test("an active session offers both kill and delete", () => {
-    const actions = sessionActions(
-      row({ pid: process.pid, heartbeat_at: new Date().toISOString() }),
-    );
-    expect(actions).toEqual([
+  test("an active session with all runs terminal offers kill, archive, delete", () => {
+    expect(sessionActions(row(fresh), true)).toEqual([
       { key: "x", hint: "kill" },
+      { key: "a", hint: "archive" },
       { key: "d", hint: "delete" },
     ]);
   });
 
-  test("a dead session offers only delete", () => {
-    expect(keys(row({ pid: DEAD_PID, heartbeat_at: new Date().toISOString() }))).toEqual(["d"]);
+  test("archive is withheld while a run is still non-terminal", () => {
+    // Same active session, but a non-terminal run in the session → no archive.
+    expect(keys(row(fresh), false)).toEqual(["x", "d"]);
   });
 
-  test("a closed session offers only delete", () => {
+  test("a dead session with all runs terminal offers archive and delete (no kill)", () => {
+    expect(keys(row({ pid: DEAD_PID, heartbeat_at: new Date().toISOString() }), true)).toEqual([
+      "a",
+      "d",
+    ]);
+  });
+
+  test("a closed session with all runs terminal offers archive and delete", () => {
     expect(
-      keys(row({ status: "closed", pid: process.pid, heartbeat_at: new Date().toISOString() })),
-    ).toEqual(["d"]);
+      keys(row({ status: "closed", pid: process.pid, heartbeat_at: new Date().toISOString() }), true),
+    ).toEqual(["a", "d"]);
+  });
+
+  test("an archived session offers only unarchive and delete", () => {
+    expect(sessionActions(row({ status: "archived" }), true)).toEqual([
+      { key: "u", hint: "unarchive" },
+      { key: "d", hint: "delete" },
+    ]);
   });
 });

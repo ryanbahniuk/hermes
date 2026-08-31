@@ -32,6 +32,13 @@ handle, and cost persist so you can leave and `--resume` later.
 
 Think of a session as *a line of thinking about some goal*, not a single command.
 
+A session is **active** while a live planner process is attached, **closed** once you leave, and
+optionally **archived** — a soft, reversible state that hides a finished conversation from the
+default listings while keeping **all** of its records (unlike delete, which erases them). Archiving
+is only permitted when every run the session dispatched is terminal (done/failed/stopped): it's a
+tidy-away for finished work, not a way to stop live work, so it refuses if a run is still going.
+`unarchive` (or just reopening the session by id) brings it back.
+
 ### Run — a batch of work
 One **problem statement fanned out across the relevant projects**, coordinated by one shared
 contract and reconciled together. A run is exactly what the planner's `delegate` produces (there
@@ -164,13 +171,14 @@ The CLI is grouped by the three concepts — `session`, `run`, `task` — each w
 | You want to… | Command |
 |---|---|
 | Start / resume the primary interface | `tack` · `tack session start` · `tack session start --resume <id>` |
-| See your conversations | `tack session list` |
-| Inspect a whole conversation | `tack session show <session>` (its run/task tree) |
+| See your conversations | `tack session list` (archived hidden; `--archived` to include them) |
+| Inspect a whole conversation | `tack session show <session>` (its run/task tree; works on archived too) |
 | See the PRs a session opened | `tack session prs <session>` · `… --refresh` to rediscover via `gh` |
 | Inspect a batch | `tack run list` · `tack task list <run>` · `tack run show <run>` |
 | Watch work happen | `tack run logs <run> -f` · `tack stable` |
 | Control a batch | `tack run stop <run>` · `tack run retry <run>` |
 | Stop / delete a conversation | `tack session kill <session>` (stop its runs, keep data) · `tack session delete <session>` (erase it entirely) |
+| Archive / restore a conversation | `tack session archive <session>` (soft-hide a finished session — needs every run terminal — keeps all data) · `tack session unarchive <session>` (restore → closed) |
 | Manage projects | `tack project list` · `tack project add <name> <path>` · `tack project remove <name>` |
 | Manage models | `tack model list` · `tack model discover` · `tack model add <name> <version> --model-id <id>` · `tack model remove <name> [version]` |
 | Choose role models | `tack model set-default <role> <name>` (fallback) · `tack model set <role> <name>` (hard pin, wins over routing) · `… <role> --clear` |

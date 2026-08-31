@@ -272,11 +272,22 @@ tack                             # open a planning session (bare == `tack sessio
 tack session start               # same thing, explicit
 tack session start --model claude-sonnet
 tack session start --resume <sessionId>   # or: tack --resume <sessionId>
-tack session list                # list your planning sessions
-tack session show <sessionId>    # its run/task tree (top-down view)
+tack session list                # list your planning sessions (archived hidden by default)
+tack session list --archived     # …include archived (soft-hidden) sessions too
+tack session show <sessionId>    # its run/task tree (top-down view) — works on archived sessions too
 tack session kill <sessionId>    # stop its background runs + mark it closed (keeps data)
+tack session archive <sessionId> # soft-hide a finished session (keeps all data; needs every run terminal)
+tack session unarchive <sessionId> # restore an archived session (back to closed)
 tack session delete <sessionId>  # permanently erase it (runs, worktrees, logs, messages)
 ```
+
+A session has three states: **active** (a live planner process is attached), **closed** (no live
+process, data kept), and **archived** — a soft, reversible state that hides the session from the
+default listings while keeping **all** of its records (unlike `delete`, which purges everything).
+Archiving is only allowed once **every run the session dispatched is terminal** (done/failed/stopped) —
+it doesn't stop or clean anything up, so it refuses (naming the offending runs) if a run is still
+running or stalled. Restore with `unarchive`, or just reopen the session by id (`tack session start
+--resume <id>`), which reactivates it.
 
 You then just talk to the planner. It asks clarifying questions, reads your projects
 (read-only) to ground itself, and when the goal is clear it calls its `delegate` tool to
@@ -307,6 +318,8 @@ tack stable               # interactive Ink dashboard: open a session to chat, a
 tack run stop <run>       # SIGTERM the run's supervisor
 tack run retry <run>      # respawn the supervisor to re-run incomplete tasks
 tack session kill <sess>  # stop every run the session dispatched, mark it closed
+tack session archive <sess>   # soft-hide a finished session (all runs terminal); keeps every record
+tack session unarchive <sess> # restore an archived session (→ closed)
 tack session delete <sess># erase the session and everything it spawned (worktrees, logs, rows)
 
 # Registries

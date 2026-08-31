@@ -79,9 +79,13 @@ export class PlannerSession {
   }
 
   /**
-   * Attaches this process to the session: stamps our pid, reactivates the row
-   * (reopening a cleanly-closed session makes it live again), and starts the
-   * heartbeat. The timer is unref'd so it never keeps the process alive on its own.
+   * Attaches this process to the session: stamps our pid, reactivates the row, and
+   * starts the heartbeat. Reactivation is deliberate and status-agnostic — reopening
+   * a cleanly-closed *or an archived* session by id makes it live again. Opening an
+   * archived session is thus an implicit unarchive: we never leave an archived row
+   * masquerading as "active", it genuinely becomes active again. (Use
+   * `unarchiveSession` to restore-without-opening.) The timer is unref'd so it never
+   * keeps the process alive on its own.
    */
   private goLive(): void {
     setSessionStatus(this.id, "active");

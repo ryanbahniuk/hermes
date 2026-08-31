@@ -2,12 +2,14 @@ import { rmSync } from "node:fs";
 import type { TackConfig } from "../config/schema";
 import {
   deleteSession as deleteSessionRow,
+  getSession,
   listRunsBySession,
   listTasks,
   setRunStatus,
   setSessionStatus,
   setSupervisorPid,
   type RunRow,
+  type SessionStatus,
 } from "../db";
 import { runLogDir } from "../logging/logs";
 import { isAlive } from "../process/spawn";
@@ -19,6 +21,75 @@ import { purgeRunWorktrees } from "../worktree/worktree";
  * of truth. Everything here is UI-agnostic: it mutates DB rows / disk and
  * returns a small result, leaving the console output (or TUI refresh) to callers.
  */
+
+/**
+ * A run is TERMINAL when its *stored* status is done/failed/stopped — it's
+ * finished and nothing is (or should be) still writing to it. This is the
+ * stored-status test, deliberately NOT liveness: a "stalled" run (non-terminal
+ * status but a dead supervisor) is NOT terminal, so it still blocks archiving
+ * until it's explicitly stopped. Mirrors the terminal check in {@link stopRun}
+ * and `runLive` — the single vocabulary of "done with this run".
+ */
+export function isRunTerminal(run: RunRow): boolean {
+  return run.status === "done" || run.status === "failed" || run.status === "stopped";
+}
+
+/** True when every run in the list is terminal (vacuously true for none). */
+export function allRunsTerminal(runs: RunRow[]): boolean {
+  return runs.every(isRunTerminal);
+}
+
+/**
+ * Whether a session may be archived: every run it dispatched is terminal. Shared
+ * by {@link archiveSession}'s gate and the UI's offered affordance so the two can
+ * never diverge on when archive is allowed. A session with no runs is archivable.
+ */
+export function sessionArchivable(sessionId: string): boolean {
+  return allRunsTerminal(listRunsBySession(sessionId));
+}
+
+/**
+ * Archive a session: a soft, reversible state that hides it from the default
+ * listings while keeping ALL of its DB records (unlike {@link deleteSession},
+ * which purges rows + worktrees + logs). Archiving does NOT clean up runs/
+ * worktrees/logs — its precondition is that they're already done, so we gate on
+ * every run being terminal and refuse (naming the offenders) otherwise. A live
+ * "active" session may still be archived — the gate is on runs, not liveness — and
+ * moves straight to "archived". Returns the id and the status it superseded.
+ */
+export function archiveSession(sessionId: string): { id: string; priorStatus: SessionStatus } {
+  const s = getSession(sessionId);
+  if (!s) throw new Error(`No such session: ${sessionId}`);
+  if (s.status === "archived") throw new Error(`Session ${sessionId} is already archived.`);
+
+  const offenders = listRunsBySession(sessionId).filter((r) => !isRunTerminal(r));
+  if (offenders.length > 0) {
+    const list = offenders.map((r) => `${r.id} (${r.status})`).join(", ");
+    throw new Error(
+      `Cannot archive session ${sessionId}: ${offenders.length} run${offenders.length === 1 ? " is" : "s are"} ` +
+        `still active — ${list}. Stop or finish them first (e.g. \`tack run stop <id>\`).`,
+    );
+  }
+
+  setSessionStatus(sessionId, "archived");
+  return { id: sessionId, priorStatus: s.status };
+}
+
+/**
+ * Restore an archived session, flipping it back to "closed" (recoverable, since
+ * archiving kept every record). Throws if the session isn't currently archived —
+ * there's nothing to restore. Reopening an archived session by id also reactivates
+ * it (see PlannerSession.goLive), so this is for restoring without opening.
+ */
+export function unarchiveSession(sessionId: string): { id: string; priorStatus: SessionStatus } {
+  const s = getSession(sessionId);
+  if (!s) throw new Error(`No such session: ${sessionId}`);
+  if (s.status !== "archived") {
+    throw new Error(`Session ${sessionId} is not archived (status: ${s.status}).`);
+  }
+  setSessionStatus(sessionId, "closed");
+  return { id: sessionId, priorStatus: s.status };
+}
 
 /**
  * Stops every run the session dispatched via the shared {@link stopRun} logic:

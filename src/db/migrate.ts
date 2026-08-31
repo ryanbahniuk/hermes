@@ -77,7 +77,7 @@ const migrations: Migration[] = [
         planner_model  TEXT,
         runtime        TEXT,
         resume_ref     TEXT,          -- claude SDK session id (null for tack)
-        status         TEXT NOT NULL, -- active | closed
+        status         TEXT NOT NULL, -- active | closed | archived (soft-hidden; no CHECK, so new values need no migration)
         cost           REAL NOT NULL DEFAULT 0,
         created_at     TEXT NOT NULL,
         updated_at     TEXT NOT NULL

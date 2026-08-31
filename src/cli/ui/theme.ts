@@ -58,6 +58,11 @@ const SESSION_STALE_MS = 60_000;
  * crashed goes stale and reads "dead" — no longer masquerading as active.
  */
 export function sessionLive(s: SessionRow): Live {
+  // Archived supersedes/implies closed for display: it's a soft-hidden, finished
+  // state, so it reads gray+dim like closed but with its own label.
+  if (s.status === "archived") {
+    return { label: "archived", color: "gray", dim: true };
+  }
   if (s.status === "closed") {
     return { label: "closed", color: "gray", dim: true };
   }
@@ -71,8 +76,8 @@ export function sessionLive(s: SessionRow): Live {
 /** A destructive action offered on a dashboard row: its key and hint verb. */
 export interface RowAction {
   /** The keybinding that fires it. */
-  key: "x" | "d";
-  /** The verb shown next to the key, e.g. "stop", "kill", "delete". */
+  key: "x" | "d" | "a" | "u";
+  /** The verb shown next to the key, e.g. "stop", "kill", "delete", "archive". */
   hint: string;
 }
 
@@ -91,11 +96,21 @@ export function runActions(r: RunRow): RowAction[] {
 /**
  * The destructive actions valid for a session *in its current live state*. Kill
  * only makes sense on an active session (a dead/closed one has nothing live to
- * signal); delete is always available regardless of liveness.
+ * signal); archive is offered only when every run is terminal (`allRunsTerminal`,
+ * threaded in by the caller — the same gate {@link archiveSession} enforces, so
+ * the offered affordance can't diverge from what the action allows); an already-
+ * archived session offers only unarchive (recover it); delete is always available.
  */
-export function sessionActions(s: SessionRow): RowAction[] {
+export function sessionActions(s: SessionRow, allRunsTerminal: boolean): RowAction[] {
   const actions: RowAction[] = [];
+  if (s.status === "archived") {
+    // A revealed archived session is finished + hidden: recover it or delete it.
+    actions.push({ key: "u", hint: "unarchive" });
+    actions.push({ key: "d", hint: "delete" });
+    return actions;
+  }
   if (sessionLive(s).label === "active") actions.push({ key: "x", hint: "kill" });
+  if (allRunsTerminal) actions.push({ key: "a", hint: "archive" });
   actions.push({ key: "d", hint: "delete" });
   return actions;
 }

@@ -246,7 +246,16 @@ resident:
 | `tack run retry <run>` | Respawn a supervisor; skip done tasks, resume in-flight ones from their runtime state. |
 | `tack session show <session>` | Print the session's Run → Task tree (top-down view). |
 | `tack session kill <session>` | SIGTERM every dispatched run's supervisor, clear its pid, mark the session **closed**. Data is kept. |
+| `tack session archive <session>` | Mark the session **archived** — a soft, reversible hidden state that keeps **all** its records. Gated: refuses (naming the offenders) unless every run is terminal (done/failed/stopped); it does **not** stop or clean anything up, so it's a precondition, not a side effect. Hidden from `tack session list` / `tack stable` by default. |
+| `tack session unarchive <session>` | Flip an archived session back to **closed** (recoverable, since archiving kept everything). Reopening by id (`session start --resume`) also reactivates it — an implicit unarchive. |
 | `tack session delete <session>` | Kill first, then best-effort remove each run's worktrees + branches and log dir, then delete the session and every row it owns (runs cascade to tasks/context/amendments; the session cascades to its messages). |
+
+Session status is `active | closed | archived`. **archived** supersedes/implies closed for display
+(gray, dim). It's hidden by default everywhere the stable UI lists sessions — `tack session list`
+(reveal with `--archived`) and the `tack stable` dashboard (press `z` to toggle archived rows in/out);
+`tack session show <id>` by direct id always resolves regardless. In the dashboard, a highlighted
+eligible session offers `a` archive (only when all its runs are terminal), and a revealed archived
+session offers `u` unarchive — alongside the existing `x`/`d` immediate-fire actions.
 
 **Terminal close vs. reboot:** detaching (new session + unref) means closing your terminal or
 shell does **not** kill a run; a machine reboot **does** (these are plain processes, not a
@@ -347,7 +356,7 @@ sessions                    -- planning conversations (the primary interface)
   planner_model text
   runtime       text        -- 'claude' | 'tack'
   resume_ref    text        -- claude SDK session id (null for tack)
-  status        text        -- active | closed
+  status        text        -- active | closed | archived (plain TEXT, no CHECK, so new values need no migration)
   cost          real        -- planner-conversation cost only; the session TOTAL
                             --   (planner + every delegated task's cost) is derived
                             --   on read by sessionTotalCost, never stored, so

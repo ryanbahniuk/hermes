@@ -9,8 +9,9 @@ import { join } from "node:path";
 const home = mkdtempSync(join(tmpdir(), "tack-actions-"));
 process.env.TACK_HOME = home;
 
-const { db, createRun, getRun, setRunStatus, setSupervisorPid } = await import("../db");
-const { stopRun } = await import("./actions");
+const { db, createRun, getRun, setRunStatus, setSupervisorPid, createSession, getSession } =
+  await import("../db");
+const { stopRun, archiveSession, unarchiveSession, sessionArchivable } = await import("./actions");
 const { settleTerminalStatus } = await import("../orchestrator/supervise");
 
 // Apply migrations so the runs table exists.
@@ -80,6 +81,71 @@ describe("stopRun", () => {
     expect(after.status).toBe("stopped");
 
     await child.exited;
+  });
+});
+
+describe("archiveSession / unarchiveSession", () => {
+  test("blocks archiving while a run is non-terminal, naming the offender", () => {
+    const s = createSession({});
+    const run = createRun({ problem: "in-flight", sessionId: s.id });
+    setRunStatus(run.id, "implementing");
+
+    expect(sessionArchivable(s.id)).toBe(false);
+    expect(() => archiveSession(s.id)).toThrow(new RegExp(run.id));
+    // The session is untouched — still whatever it was, not archived.
+    expect(getSession(s.id)!.status).not.toBe("archived");
+  });
+
+  test("a stalled run (non-terminal status, dead supervisor) still blocks archiving", () => {
+    const s = createSession({});
+    const run = createRun({ problem: "stalled", sessionId: s.id });
+    setRunStatus(run.id, "planning");
+    setSupervisorPid(run.id, DEAD_PID);
+
+    expect(sessionArchivable(s.id)).toBe(false);
+    expect(() => archiveSession(s.id)).toThrow();
+  });
+
+  test("archives when every run is terminal, setting status archived", () => {
+    const s = createSession({});
+    const a = createRun({ problem: "a", sessionId: s.id });
+    const b = createRun({ problem: "b", sessionId: s.id });
+    setRunStatus(a.id, "done");
+    setRunStatus(b.id, "stopped");
+
+    expect(sessionArchivable(s.id)).toBe(true);
+    const res = archiveSession(s.id);
+
+    expect(res.priorStatus).toBe("active");
+    expect(getSession(s.id)!.status).toBe("archived");
+  });
+
+  test("archives a session with no runs", () => {
+    const s = createSession({});
+    expect(sessionArchivable(s.id)).toBe(true);
+    expect(archiveSession(s.id).id).toBe(s.id);
+    expect(getSession(s.id)!.status).toBe("archived");
+  });
+
+  test("archiving an already-archived session throws", () => {
+    const s = createSession({});
+    archiveSession(s.id);
+    expect(() => archiveSession(s.id)).toThrow(/already archived/);
+  });
+
+  test("unarchive flips an archived session back to closed", () => {
+    const s = createSession({});
+    archiveSession(s.id);
+
+    const res = unarchiveSession(s.id);
+
+    expect(res.priorStatus).toBe("archived");
+    expect(getSession(s.id)!.status).toBe("closed");
+  });
+
+  test("unarchive throws when the session isn't archived", () => {
+    const s = createSession({});
+    expect(() => unarchiveSession(s.id)).toThrow(/not archived/);
   });
 });
 
