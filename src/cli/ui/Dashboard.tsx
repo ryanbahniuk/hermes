@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
+import type { TackConfig } from "../../config/schema";
 import {
   listRunsBySession,
   listSessions,
@@ -9,6 +10,7 @@ import {
   type SessionCost,
   type SessionRow,
 } from "../../db";
+import { deleteSession, killSession, stopRun } from "../../sessions/actions";
 import { runLive, sessionLive, usd } from "./theme";
 
 // A dashboard row is either a session header or one of its runs, flattened into
@@ -49,6 +51,8 @@ function RowView({ row, selected }: { row: Row; selected: boolean }): React.Reac
         <Text dimColor>
           {"  " + s.id + "  " + live.label + "  " + (s.planner_model ?? "-") + "  " + usd(cost.total)}
         </Text>
+        {/* On the highlighted session both destructive actions are available. */}
+        {selected && <Text color="yellow">{"  x kill · d delete"}</Text>}
       </Box>
     );
   }
@@ -65,11 +69,15 @@ function RowView({ row, selected }: { row: Row; selected: boolean }): React.Reac
         {row.run.id + "  " + `${row.taskCount} task${row.taskCount === 1 ? "" : "s"}` + "  " + usd(row.run.cost)}
       </Text>
       <Text dimColor>{"  " + row.run.problem.slice(0, 40)}</Text>
+      {/* A run only supports stop — delete is session-only, deliberately absent. */}
+      {selected && <Text color="yellow">{"  x stop"}</Text>}
     </Box>
   );
 }
 
 export interface DashboardProps {
+  /** Loaded config — the project name→repo map delete needs to purge worktrees. */
+  config: TackConfig;
   /** Open the interactive chat for a session (Enter on a session row). */
   onOpenSession: (sessionId: string) => void;
   /** Open the read-only log for a run (Enter on a run row). */
@@ -83,9 +91,17 @@ export interface DashboardProps {
 /**
  * The `stable` dashboard: every session and its dispatched runs in one live,
  * navigable tree. Arrow keys move the cursor; Enter opens the highlighted row —
- * a session into its chat, a run into its read-only log.
+ * a session into its chat, a run into its read-only log. Destructive actions fire
+ * immediately on the highlighted row (no confirmation): `x` kills a session or
+ * stops a run, `d` permanently deletes a session.
  */
-export function Dashboard({ onOpenSession, onOpenRun, onNewSession, onQuit }: DashboardProps): React.ReactElement {
+export function Dashboard({
+  config,
+  onOpenSession,
+  onOpenRun,
+  onNewSession,
+  onQuit,
+}: DashboardProps): React.ReactElement {
   const [rows, setRows] = useState<Row[]>(() => buildRows());
   const [cursor, setCursor] = useState(0);
 
@@ -99,6 +115,7 @@ export function Dashboard({ onOpenSession, onOpenRun, onNewSession, onQuit }: Da
   // Keep the cursor in range as rows appear and disappear under it.
   const max = Math.max(0, rows.length - 1);
   const active = Math.min(cursor, max);
+  const activeRow = rows[active];
 
   useInput((input, key) => {
     if (input === "q") return void onQuit();
@@ -110,8 +127,30 @@ export function Dashboard({ onOpenSession, onOpenRun, onNewSession, onQuit }: Da
       if (!row) return;
       if (row.kind === "session") onOpenSession(row.session.id);
       else onOpenRun(row.run.id);
+      return;
+    }
+    // Destructive actions fire immediately on the highlighted row; the next poll
+    // (or this eager rebuild) drops the closed/deleted row and re-clamps the cursor.
+    if (input === "x") {
+      const row = rows[active];
+      if (!row) return;
+      if (row.kind === "session") killSession(row.session.id);
+      else stopRun(row.run);
+      return void setRows(buildRows());
+    }
+    if (input === "d") {
+      const row = rows[active];
+      // Delete is session-only — a run row has no delete action.
+      if (!row || row.kind !== "session") return;
+      deleteSession(row.session.id, config);
+      return void setRows(buildRows());
     }
   });
+
+  // The available destructive verbs depend on what's highlighted: sessions can be
+  // killed or deleted; runs can only be stopped.
+  const actionHelp =
+    activeRow?.kind === "run" ? "x stop" : "x kill · d delete";
 
   return (
     <Box flexDirection="column" padding={1}>
@@ -128,7 +167,7 @@ export function Dashboard({ onOpenSession, onOpenRun, onNewSession, onQuit }: Da
       </Box>
 
       <Box marginTop={1}>
-        <Text dimColor>↑/↓ move · Enter open · n new session · q quit</Text>
+        <Text dimColor>{`↑/↓ move · Enter open · n new session · ${actionHelp} · q quit`}</Text>
       </Box>
     </Box>
   );

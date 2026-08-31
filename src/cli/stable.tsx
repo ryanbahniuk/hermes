@@ -6,7 +6,7 @@ import { PlannerSession } from "../planner/session";
 import { ChatView } from "./ui/ChatView";
 import { Dashboard } from "./ui/Dashboard";
 import { LogView } from "./ui/LogView";
-import { ensureInteractive } from "./ui/tty";
+import { ensureInteractive, withAltScreen } from "./ui/tty";
 
 type PriorMessage = { role: "user" | "assistant"; content: string };
 
@@ -63,6 +63,7 @@ function Stable({ config }: { config: TackConfig }): React.ReactElement {
     case "dashboard":
       return (
         <Dashboard
+          config={config}
           onOpenSession={openSession}
           onOpenRun={(runId) => setMode({ name: "log", runId })}
           onNewSession={newSession}
@@ -89,6 +90,10 @@ function Stable({ config }: { config: TackConfig }): React.ReactElement {
 export async function runStable(config: TackConfig): Promise<void> {
   if (!ensureInteractive("stable")) return;
   db();
-  const app = render(<Stable config={config} />);
-  await app.waitUntilExit();
+  // Paint into the alternate screen buffer (like vim/less) so the dashboard gets
+  // clean full-screen real estate and the user's scrollback is restored on exit.
+  await withAltScreen(async () => {
+    const app = render(<Stable config={config} />);
+    await app.waitUntilExit();
+  });
 }

@@ -4,7 +4,7 @@ import type { TackConfig } from "../config/schema";
 import { db } from "../db";
 import { PlannerSession } from "../planner/session";
 import { ChatView } from "./ui/ChatView";
-import { ensureInteractive } from "./ui/tty";
+import { ensureInteractive, withAltScreen } from "./ui/tty";
 
 function StandaloneChat({
   session,
@@ -34,8 +34,13 @@ export async function runChat(
     : PlannerSession.start(config, opts.modelRef);
   const history = opts.resume ? session.history() : [];
 
-  const app = render(<StandaloneChat session={session} history={history} />);
-  await app.waitUntilExit();
+  // Run the chat in the alternate screen buffer so it owns the whole terminal
+  // and the user's prior scrollback returns intact on exit. The "session saved"
+  // note below lands in the restored (normal) buffer.
+  await withAltScreen(async () => {
+    const app = render(<StandaloneChat session={session} history={history} />);
+    await app.waitUntilExit();
+  });
   session.close(); // clean exit: stop the heartbeat, mark the session closed
 
   process.stdout.write(

@@ -16,7 +16,7 @@ import {
   type ModelRoleKey,
   type ModelSection,
 } from "../src/config/edit";
-import type { AwsProfile, ModelInput, Pricing } from "../src/config/schema";
+import type { AwsProfile, ModelInput, Pricing, TackConfig } from "../src/config/schema";
 import { resolveModel } from "../src/models/registry";
 import {
   resolvePricing,
@@ -46,15 +46,12 @@ import {
   getSession,
   listRunsBySession,
   sessionTotalCost,
-  setSessionStatus,
-  deleteSession,
   listSessionPrs,
 } from "../src/db";
+import { killSession, deleteSession, stopRun } from "../src/sessions/actions";
 import { discoverSessionPrs } from "../src/projects/prs";
 import { spawnSupervisor, isAlive } from "../src/process/spawn";
-import { followLog, readLog, runLogFile, taskLogFile, runLogDir } from "../src/logging/logs";
-import { purgeRunWorktrees } from "../src/worktree/worktree";
-import { rmSync } from "node:fs";
+import { followLog, readLog, runLogFile, taskLogFile } from "../src/logging/logs";
 import { initHome } from "../src/init";
 import { supervise } from "../src/orchestrator/supervise";
 
@@ -199,9 +196,9 @@ const runStop = defineCommand({
     db();
     const r = getRun(String(args.run));
     if (!r) throw new Error(`No such run: ${args.run}`);
-    if (!isAlive(r.supervisor_pid)) return void console.log(pc.yellow("Supervisor is not running."));
-    process.kill(r.supervisor_pid!, "SIGTERM");
-    console.log(pc.green(`Sent SIGTERM to supervisor pid ${r.supervisor_pid}`));
+    const pid = r.supervisor_pid;
+    if (stopRun(r) === "not-running") return void console.log(pc.yellow("Supervisor is not running."));
+    console.log(pc.green(`Sent SIGTERM to supervisor pid ${pid}`));
   }),
 });
 
@@ -347,26 +344,6 @@ const sessionPrs = defineCommand({
   }),
 });
 
-/**
- * SIGTERMs the live supervisor of every run the session dispatched, clearing
- * each stopped run's recorded pid. Returns how many supervisors were signalled.
- * Terminal/already-dead runs are left untouched.
- */
-function stopSessionRuns(sessionId: string): number {
-  let stopped = 0;
-  for (const r of listRunsBySession(sessionId)) {
-    if (!isAlive(r.supervisor_pid)) continue;
-    try {
-      process.kill(r.supervisor_pid!, "SIGTERM");
-      setSupervisorPid(r.id, null);
-      stopped++;
-    } catch {
-      // Already gone between the liveness check and the signal — nothing to do.
-    }
-  }
-  return stopped;
-}
-
 const sessionKill = defineCommand({
   meta: { name: "kill", description: "Stop a session's background runs and mark it closed (keeps its data)" },
   args: { session: { type: "positional", required: true, description: "session id" } },
@@ -374,8 +351,7 @@ const sessionKill = defineCommand({
     db();
     const s = getSession(String(args.session));
     if (!s) throw new Error(`No such session: ${args.session}`);
-    const stopped = stopSessionRuns(s.id);
-    setSessionStatus(s.id, "closed");
+    const { stopped } = killSession(s.id);
     console.log(
       pc.green(`Killed session ${pc.bold(s.id)}`) +
         pc.dim(stopped > 0 ? `  (stopped ${stopped} run supervisor${stopped === 1 ? "" : "s"})` : "  (no runs were live)"),
@@ -395,34 +371,18 @@ const sessionDelete = defineCommand({
     const s = getSession(String(args.session));
     if (!s) throw new Error(`No such session: ${args.session}`);
 
-    // 1. Stop anything still running so we don't delete rows out from under a
-    //    live supervisor (which would keep writing to a now-orphaned run).
-    const stopped = stopSessionRuns(s.id);
-
-    // 2. Best-effort disk cleanup per run: git worktrees + branches, then logs.
-    //    Resolve each project's repo root from config; a config that no longer
-    //    loads or lists a project just means the on-disk sweep does the pruning.
-    let projectRepos = new Map<string, string>();
+    // Resolve config for the project→repo map delete uses to prune worktree
+    // branches; a config that no longer loads just falls back to the on-disk
+    // sweep inside deleteSession.
+    let config: TackConfig | undefined;
     try {
-      const config = await loadConfig();
-      projectRepos = new Map(config.projects.map((p) => [p.name, p.path]));
+      config = await loadConfig();
     } catch {
-      // No usable config — fall back to the directory-level sweep below.
+      // No usable config — deleteSession still sweeps the worktrees directory.
     }
-    const runs = listRunsBySession(s.id);
-    for (const r of runs) {
-      const projects = [...new Set(listTasks(r.id).map((t) => t.project_name))]
-        .filter((name) => projectRepos.has(name))
-        .map((name) => ({ name, repo: projectRepos.get(name)! }));
-      purgeRunWorktrees(r.id, projects);
-      rmSync(runLogDir(r.id), { recursive: true, force: true });
-    }
+    const { stopped, runs } = deleteSession(s.id, config);
 
-    // 3. Erase every DB row (runs cascade to tasks/context/amendments; the
-    //    session cascades to its messages).
-    deleteSession(s.id);
-
-    console.log(pc.green(`Deleted session ${pc.bold(s.id)}`) + pc.dim(`  (${runs.length} run${runs.length === 1 ? "" : "s"} removed)`));
+    console.log(pc.green(`Deleted session ${pc.bold(s.id)}`) + pc.dim(`  (${runs} run${runs === 1 ? "" : "s"} removed)`));
     if (stopped > 0) console.log(pc.dim(`  stopped ${stopped} live run supervisor${stopped === 1 ? "" : "s"}`));
   }),
 });
