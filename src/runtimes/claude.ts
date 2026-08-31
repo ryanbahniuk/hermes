@@ -12,6 +12,7 @@ import {
 import { assertReadable, assertWritable, type Scoping } from "../tools/ops";
 import { prBranchInstruction } from "../worktree/worktree";
 import { render, templates } from "../prompts";
+import { repoGuidance } from "./guidance";
 import { defaultRegion } from "../models/chat";
 import type { ResolvedModel } from "../models/registry";
 import { createClaudeCoordinationServer } from "../tools/coordination";
@@ -99,6 +100,7 @@ function systemAppend(task: AgentTask): string {
   return render(templates.workerClaude, {
     worktree: task.scoping.worktree,
     readAllowlist: task.scoping.readAllowlist.join(", ") || "(none)",
+    repoGuidance: repoGuidance(task.scoping.worktree),
     sharedContext: task.sharedContext,
     prBranch: prBranchInstruction(task.sessionId),
   });

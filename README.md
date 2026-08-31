@@ -377,6 +377,59 @@ LangGraph), same as the workers. State lives in SQLite (`~/.tack/tack.db`) — i
 sessions and their transcripts; logs in `~/.tack/logs/<run>/`. There is no always-on daemon —
 only the foreground chat and active runs have a process.
 
+## Prompts
+
+Every system prompt Tack sends to a model lives as a plain Markdown file in
+[`src/prompts/`](src/prompts/), separate from the code that uses it. Editing an agent's
+behavior means editing prose, not TypeScript. [`src/prompts/index.ts`](src/prompts/index.ts)
+imports each `.md` file as a string (via Bun's `with { type: "text" }`) so the text is baked
+into the compiled binary — no filesystem access or path resolution at runtime.
+
+The files fall into two groups.
+
+**Static prompts** (exported as `prompts.*`) are used verbatim, no interpolation:
+
+| File | Used by | Role |
+| --- | --- | --- |
+| `planner-session.md` | the interactive planning session | System prompt for the planner — the human's thinking partner that clarifies, investigates read-only, and delegates. It plans and dispatches; it never writes code. |
+| `orchestrator-plan.md` | a run's supervisor (planning step) | Instructs the powerful model to pick the relevant projects and author the shared cross-project contract. |
+| `adjudicate.md` | a run's supervisor (adjudication step) | Governs how a worker's proposed amendment to the shared contract is accepted or rejected (trust the existing contract by default). |
+
+**Templates** (exported as `templates.*`) contain placeholders filled in per task by `render()`:
+
+| File | Used by | Role |
+| --- | --- | --- |
+| `worker-tack.md` | the `tack` (Bedrock/LangGraph) runtime | Worker system prompt: work autonomously inside your isolated worktree. |
+| `worker-claude.md` | the `claude` (Claude Agent SDK) runtime | Worker system prompt for the Claude runtime. |
+| `pr-branch.md` | both worker prompts (injected via `{{prBranch}}`) | The branch-naming convention a worker must follow if it opens a PR, so Tack can discover it. |
+
+`render(template, vars)` is a minimal renderer (see `index.ts`) supporting two forms:
+
+- `{{var}}` → the value of `vars.var` (empty string if absent), e.g. `{{worktree}}`, `{{branch}}`.
+- `{{#if var}}…{{/if}}` → the enclosed block only when `vars.var` is non-blank, e.g. the
+  `sharedContext` contract block is omitted when a run has no shared context.
+
+### Per-repo guidance (CLAUDE.md / AGENTS.md)
+
+Guidance specific to one repo lives **in that repo**, not in Tack config. Before each worker
+runs, Tack reads `CLAUDE.md` and `AGENTS.md` from the worktree root (a checkout off the
+project's HEAD) and injects their contents into the worker prompt via the `{{repoGuidance}}`
+block — so whatever a repo already documents for its human contributors, the worker follows too.
+This is read the same way for **both** runtimes (`src/runtimes/guidance.ts`); we read the files
+ourselves rather than relying on any one SDK's settings loader (the `claude` runtime runs with
+`settingSources: []`, so it would not otherwise pick these up). If a repo has neither file, the
+block is dropped. When repo guidance and a run's `sharedContext` conflict, the cross-project
+`sharedContext` contract wins.
+
+### Editing a prompt
+
+1. Edit the relevant `.md` file. To add a new placeholder, use `{{name}}` (or `{{#if name}}…{{/if}}`)
+   and pass `name` in the `vars` object at the `render()` call site.
+2. To add a whole new prompt, drop a `.md` file in `src/prompts/`, `import` it in `index.ts`, and
+   add it to either the `prompts` (static) or `templates` (interpolated) export.
+3. Run `bun run typecheck`. Because prompts are compiled into the binary, rebuild (`bun run build`,
+   if you distribute the compiled `tack`) for changes to take effect outside `bun run`.
+
 ## Development
 
 ```bash

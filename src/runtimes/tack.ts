@@ -11,6 +11,7 @@ import { createTackTools } from "../tools/tack-tools";
 import { createTackCoordinationTools } from "../tools/coordination";
 import { prBranchInstruction } from "../worktree/worktree";
 import { render, templates } from "../prompts";
+import { repoGuidance } from "./guidance";
 import type { AgentEvent, AgentRuntime, AgentTask } from "./types";
 
 export function contentToText(content: unknown): string {
@@ -27,6 +28,7 @@ function systemPrompt(task: AgentTask): string {
   return render(templates.workerTack, {
     worktree: task.scoping.worktree,
     readAllowlist: task.scoping.readAllowlist.join(", ") || "(none)",
+    repoGuidance: repoGuidance(task.scoping.worktree),
     sharedContext: task.sharedContext,
     prBranch: prBranchInstruction(task.sessionId),
   });
