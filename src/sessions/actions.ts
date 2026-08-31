@@ -21,21 +21,16 @@ import { purgeRunWorktrees } from "../worktree/worktree";
  */
 
 /**
- * SIGTERMs the live supervisor of every run the session dispatched, clearing
- * each stopped run's recorded pid. Returns how many supervisors were signalled.
- * Terminal/already-dead runs are left untouched.
+ * Stops every run the session dispatched via the shared {@link stopRun} logic:
+ * live supervisors are SIGTERM'd and their runs settled as `stopped`; stalled
+ * (non-terminal, dead-supervisor) runs are likewise marked `stopped`; already-
+ * terminal runs are left untouched. Returns how many live supervisors were
+ * signalled.
  */
 export function stopSessionRuns(sessionId: string): number {
   let stopped = 0;
   for (const r of listRunsBySession(sessionId)) {
-    if (!isAlive(r.supervisor_pid)) continue;
-    try {
-      process.kill(r.supervisor_pid!, "SIGTERM");
-      setSupervisorPid(r.id, null);
-      stopped++;
-    } catch {
-      // Already gone between the liveness check and the signal — nothing to do.
-    }
+    if (stopRun(r) === "stopped") stopped++;
   }
   return stopped;
 }
@@ -90,25 +85,33 @@ export function deleteSession(
 
 /**
  * Outcome of {@link stopRun}:
- * - `"stopped"`  — a live supervisor was SIGTERM'd (it will mark the run terminal);
+ * - `"stopped"`  — a live supervisor was SIGTERM'd and the run settled `stopped`;
  * - `"cleared"`  — a stalled run (non-terminal but its supervisor is dead) was
- *                  forced to a terminal `failed` state so it stops reading as live;
- * - `"not-running"` — a no-op: the run is already terminal (done/failed).
+ *                  forced to a terminal `stopped` state so it stops reading as live;
+ * - `"not-running"` — a no-op: the run is already terminal (done/failed/stopped).
  */
 export type StopRunResult = "stopped" | "cleared" | "not-running";
 
 /**
- * Stop a single non-terminal run. If its supervisor is alive, SIGTERM it and
- * clear the recorded pid (the supervisor then marks the run terminal itself).
- * If the run is stalled — non-terminal yet its supervisor is already dead — it
- * will never reach a terminal state on its own, so mark it `failed` and clear
- * the stale pid. A run that is already terminal is left untouched.
+ * Stop a single non-terminal run as a deliberate, user-initiated stop — so it
+ * settles `stopped`, never `failed` (which stays reserved for genuine crashes).
+ *
+ * We record the `stopped` status *before* clearing the pid so the run is already
+ * terminal by the time the SIGTERM lands: the supervisor's own terminal writes
+ * respect an existing `stopped` status and won't clobber it back to `failed`
+ * (see {@link settleTerminalStatus} in the supervisor). If the supervisor is
+ * alive we SIGTERM it; if the run is stalled — non-terminal yet its supervisor
+ * is already dead — it would never reach a terminal state on its own, so we
+ * settle it here. A run that is already terminal is left untouched.
  */
 export function stopRun(run: RunRow): StopRunResult {
-  if (run.status === "done" || run.status === "failed") return "not-running";
+  if (run.status === "done" || run.status === "failed" || run.status === "stopped") {
+    return "not-running";
+  }
   if (isAlive(run.supervisor_pid)) {
     try {
       process.kill(run.supervisor_pid!, "SIGTERM");
+      setRunStatus(run.id, "stopped");
       setSupervisorPid(run.id, null);
       return "stopped";
     } catch {
@@ -116,7 +119,7 @@ export function stopRun(run: RunRow): StopRunResult {
       // Fall through and settle it as a stalled run.
     }
   }
-  setRunStatus(run.id, "failed");
+  setRunStatus(run.id, "stopped");
   setSupervisorPid(run.id, null);
   return "cleared";
 }

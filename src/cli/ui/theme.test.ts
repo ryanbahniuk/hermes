@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { RunRow, SessionRow } from "../../db";
-import { runActions, sessionActions, sessionLive } from "./theme";
+import { runActions, runLive, sessionActions, sessionLive, statusColor } from "./theme";
 
 // A pid that (practically) never exists, so isAlive() is false — a stand-in for
 // a session whose interactive process was killed or crashed.
@@ -69,6 +69,35 @@ describe("sessionLive", () => {
   });
 });
 
+describe("statusColor", () => {
+  test("maps stopped to a distinct blue, apart from failed/done/stalled", () => {
+    expect(statusColor("stopped")).toBe("blue");
+    expect(statusColor("failed")).toBe("red");
+    expect(statusColor("done")).toBe("green");
+    expect(statusColor("stalled")).toBe("yellow");
+  });
+});
+
+describe("runLive", () => {
+  test("a stopped run is terminal: label stopped, blue, dimmed", () => {
+    const live = runLive(runRow({ status: "stopped", supervisor_pid: process.pid }));
+    expect(live.label).toBe("stopped");
+    expect(live.color).toBe("blue");
+    expect(live.dim).toBe(true);
+  });
+
+  test("done and failed stay terminal", () => {
+    expect(runLive(runRow({ status: "done" })).dim).toBe(true);
+    expect(runLive(runRow({ status: "failed" })).dim).toBe(true);
+  });
+
+  test("a live in-flight run reads running", () => {
+    const live = runLive(runRow({ status: "implementing", supervisor_pid: process.pid }));
+    expect(live.label).toBe("running");
+    expect(live.dim).toBe(false);
+  });
+});
+
 describe("runActions", () => {
   const keys = (r: RunRow) => runActions(r).map((a) => a.key);
 
@@ -88,6 +117,10 @@ describe("runActions", () => {
 
   test("a failed run offers nothing", () => {
     expect(keys(runRow({ status: "failed", supervisor_pid: process.pid }))).toEqual([]);
+  });
+
+  test("a stopped run is terminal and offers nothing", () => {
+    expect(keys(runRow({ status: "stopped", supervisor_pid: process.pid }))).toEqual([]);
   });
 });
 

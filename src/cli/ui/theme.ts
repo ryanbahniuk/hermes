@@ -16,6 +16,10 @@ export function statusColor(status: string): string {
       return "green";
     case "failed":
       return "red";
+    // A user-initiated stop is terminal but not a failure — blue sets it apart
+    // from failed=red, done=green, and stalled/dead=yellow.
+    case "stopped":
+      return "blue";
     case "stalled":
       return "yellow";
     case "pending":
@@ -31,9 +35,9 @@ export function statusColor(status: string): string {
  * This is the single source of truth shared by the dashboard and the chat view.
  */
 export function runLive(r: RunRow): Live {
-  const terminal = r.status === "done" || r.status === "failed";
+  const terminal = r.status === "done" || r.status === "failed" || r.status === "stopped";
   if (terminal) {
-    return { label: r.status, color: r.status === "done" ? "green" : "red", dim: true };
+    return { label: r.status, color: statusColor(r.status), dim: true };
   }
   return isAlive(r.supervisor_pid)
     ? { label: "running", color: "green", dim: false }
@@ -76,11 +80,11 @@ export interface RowAction {
  * The destructive actions valid for a run *in its current live state* — the
  * single source of truth behind the per-row hint, the footer, and the key
  * handler. A run can only be stopped while it's still in flight (running or
- * stalled); a terminal run (done/failed) offers nothing.
+ * stalled); a terminal run (done/failed/stopped) offers nothing.
  */
 export function runActions(r: RunRow): RowAction[] {
   const { label } = runLive(r);
-  const terminal = label === "done" || label === "failed";
+  const terminal = label === "done" || label === "failed" || label === "stopped";
   return terminal ? [] : [{ key: "x", hint: "stop" }];
 }
 

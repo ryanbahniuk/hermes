@@ -12,11 +12,24 @@ import {
   setRunCost,
   setRunStatus,
   setSupervisorPid,
+  type RunStatus,
 } from "../db";
 import { appendLog, runLogFile } from "../logging/logs";
 import { executeTask } from "./execute";
 import { plan } from "./plan";
 import { reconcile } from "./reconcile";
+
+/**
+ * Records the supervisor's own terminal outcome (`done`/`failed`) — unless a
+ * user-initiated stop already settled the run as `stopped`. `stopRun` writes
+ * `stopped` and then SIGTERMs us; if we're still winding down in that race
+ * window we must not clobber the user's intent back to `failed`. A genuine
+ * crash still lands as `failed`, because in that case nobody set `stopped`.
+ */
+export function settleTerminalStatus(runId: string, status: RunStatus): void {
+  if (getRun(runId)?.status === "stopped") return;
+  setRunStatus(runId, status);
+}
 
 /**
  * The detached supervisor body: owns a run end-to-end.
@@ -40,7 +53,7 @@ export async function supervise(runId: string): Promise<void> {
     config = await loadConfig();
   } catch (err) {
     appendLog(runLog, `config error: ${(err as Error).message}`);
-    setRunStatus(runId, "failed");
+    settleTerminalStatus(runId, "failed");
     setSupervisorPid(runId, null);
     return;
   }
@@ -94,7 +107,7 @@ export async function supervise(runId: string): Promise<void> {
     }
   } catch (err) {
     appendLog(runLog, `planning failed: ${(err as Error).message}`);
-    setRunStatus(runId, "failed");
+    settleTerminalStatus(runId, "failed");
     setSupervisorPid(runId, null);
     return;
   }
@@ -142,7 +155,7 @@ export async function supervise(runId: string): Promise<void> {
   const anyFailed = statuses.includes("failed");
   const totalCost = listTasks(runId).reduce((sum, t) => sum + t.cost, 0);
   setRunCost(runId, totalCost);
-  setRunStatus(runId, anyFailed ? "failed" : "done");
+  settleTerminalStatus(runId, anyFailed ? "failed" : "done");
   setSupervisorPid(runId, null);
   appendLog(
     runLog,
