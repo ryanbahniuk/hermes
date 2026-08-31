@@ -11,7 +11,15 @@ import {
   type SessionRow,
 } from "../../db";
 import { deleteSession, killSession, stopRun } from "../../sessions/actions";
-import { runLive, sessionLive, usd } from "./theme";
+import {
+  actionHint,
+  runActions,
+  runLive,
+  sessionActions,
+  sessionLive,
+  usd,
+  type RowAction,
+} from "./theme";
 
 // A dashboard row is either a session header or one of its runs, flattened into
 // a single navigable list so a single cursor can walk the whole tree.
@@ -30,6 +38,15 @@ function buildRows(): Row[] {
   return rows;
 }
 
+/**
+ * The destructive actions valid for a row in its current live state — the single
+ * source of truth shared by the per-row hint, the footer, and the key handlers,
+ * so an offered affordance can never diverge from what the key actually does.
+ */
+function actionsFor(row: Row): RowAction[] {
+  return row.kind === "session" ? sessionActions(row.session) : runActions(row.run);
+}
+
 function RowView({ row, selected }: { row: Row; selected: boolean }): React.ReactElement {
   const pointer = selected ? (
     <Text color="cyan" bold>
@@ -42,22 +59,28 @@ function RowView({ row, selected }: { row: Row; selected: boolean }): React.Reac
   if (row.kind === "session") {
     const { session: s, cost } = row;
     const live = sessionLive(s);
+    const actions = sessionActions(s);
     return (
       <Box>
         {pointer}
         <Text color={live.color} dimColor={live.dim}>●</Text>
         <Text> </Text>
+        {/* The live label sits right beside its colored dot so the color always
+            reads with its meaning — matching how run rows show their status. */}
+        <Text color={live.color} dimColor={live.dim}>{live.label}</Text>
+        <Text> </Text>
         <Text bold={selected}>{(s.title ?? "(untitled)").slice(0, 48)}</Text>
         <Text dimColor>
-          {"  " + s.id + "  " + live.label + "  " + (s.planner_model ?? "-") + "  " + usd(cost.total)}
+          {"  " + s.id + "  " + (s.planner_model ?? "-") + "  " + usd(cost.total)}
         </Text>
-        {/* On the highlighted session both destructive actions are available. */}
-        {selected && <Text color="yellow">{"  x kill · d delete"}</Text>}
+        {/* Only the transitions valid for this session's state are offered. */}
+        {selected && actions.length > 0 && <Text color="yellow">{"  " + actionHint(actions)}</Text>}
       </Box>
     );
   }
 
   const live = runLive(row.run);
+  const actions = runActions(row.run);
   return (
     <Box>
       {pointer}
@@ -69,8 +92,8 @@ function RowView({ row, selected }: { row: Row; selected: boolean }): React.Reac
         {row.run.id + "  " + `${row.taskCount} task${row.taskCount === 1 ? "" : "s"}` + "  " + usd(row.run.cost)}
       </Text>
       <Text dimColor>{"  " + row.run.problem.slice(0, 40)}</Text>
-      {/* A run only supports stop — delete is session-only, deliberately absent. */}
-      {selected && <Text color="yellow">{"  x stop"}</Text>}
+      {/* A terminal run offers nothing; a live/stalled one can be stopped. */}
+      {selected && actions.length > 0 && <Text color="yellow">{"  " + actionHint(actions)}</Text>}
     </Box>
   );
 }
@@ -134,6 +157,9 @@ export function Dashboard({
     if (input === "x") {
       const row = rows[active];
       if (!row) return;
+      // Inert unless stop/kill is a valid transition for this row's live state —
+      // e.g. `x` on a terminal run or a non-active session does nothing.
+      if (!actionsFor(row).some((a) => a.key === "x")) return;
       if (row.kind === "session") killSession(row.session.id);
       else stopRun(row.run);
       return void setRows(buildRows());
@@ -147,10 +173,17 @@ export function Dashboard({
     }
   });
 
-  // The available destructive verbs depend on what's highlighted: sessions can be
-  // killed or deleted; runs can only be stopped.
-  const actionHelp =
-    activeRow?.kind === "run" ? "x stop" : "x kill · d delete";
+  // The footer help is derived from the highlighted row's actual available
+  // actions (same source as the per-row hint), so it never advertises a verb the
+  // key handler would ignore. A terminal run contributes no destructive verbs.
+  const actionHelp = activeRow ? actionHint(actionsFor(activeRow)) : "";
+  const footer = [
+    "↑/↓ move",
+    "Enter open",
+    "n new session",
+    ...(actionHelp ? [actionHelp] : []),
+    "q quit",
+  ].join(" · ");
 
   return (
     <Box flexDirection="column" padding={1}>
@@ -167,7 +200,7 @@ export function Dashboard({
       </Box>
 
       <Box marginTop={1}>
-        <Text dimColor>{`↑/↓ move · Enter open · n new session · ${actionHelp} · q quit`}</Text>
+        <Text dimColor>{footer}</Text>
       </Box>
     </Box>
   );

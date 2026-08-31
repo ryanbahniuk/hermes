@@ -7,7 +7,11 @@ export type RunStatus =
   | "coordinating"
   | "reconciling"
   | "done"
-  | "failed";
+  | "failed"
+  // Terminal, and distinct from `failed`: the user stopped the run on purpose
+  // (dashboard `x`, `tack run stop`, or a session kill/delete). `failed` stays
+  // reserved for genuine errors/crashes.
+  | "stopped";
 
 export type TaskStatus =
   | "pending"
