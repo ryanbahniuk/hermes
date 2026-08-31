@@ -60,7 +60,10 @@ export function selectPlannerRuntime(ctx: PlannerContext): PlannerRuntime {
 }
 
 // Tools a read-only planner may use directly; anything else is denied by the hook.
-const CLAUDE_READ_TOOLS = new Set(["Read", "Grep", "Glob", "LS", "TodoWrite"]);
+// `ToolSearch` is a read-only meta-tool: the SDK defers MCP tools (our delegate/
+// list_projects/check_runs) behind it, so the planner must load their schemas via
+// ToolSearch before it can call them. Without it the planner can never delegate.
+const CLAUDE_READ_TOOLS = new Set(["Read", "Grep", "Glob", "LS", "TodoWrite", "ToolSearch"]);
 const CLAUDE_DISALLOWED = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "WebSearch", "WebFetch", "Task"];
 
 /** The `claude` planner: Claude Agent SDK, resumed per turn, read-only + delegate. */
