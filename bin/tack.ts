@@ -513,6 +513,14 @@ const modelAdd = defineCommand({
       alias: "p",
       description: "Provider key (anthropic, meta, …). Derived from the matched model when omitted.",
     },
+    runtime: {
+      type: "string",
+      description: "Runtime override: claude | tack. Inferred from provider when omitted (anthropic → claude, else tack).",
+    },
+    backend: {
+      type: "string",
+      description: "Backend override: bedrock | anthropic. Defaults to bedrock; anthropic requires --api-model-id + runtime claude.",
+    },
     "model-id": {
       type: "string",
       description: "Exact Bedrock model id to bind (as shown by `tack model discover`)",
@@ -539,6 +547,19 @@ const modelAdd = defineCommand({
     const version = String(args.version);
     const providerFlag = args.provider ? String(args.provider).toLowerCase() : undefined;
     const awsProfileKey = args["aws-profile"] ? String(args["aws-profile"]) : undefined;
+    const runtimeRaw = args.runtime ? String(args.runtime).toLowerCase() : undefined;
+    if (runtimeRaw && runtimeRaw !== "claude" && runtimeRaw !== "tack") {
+      throw new Error(`Invalid --runtime "${runtimeRaw}" (expected "claude" or "tack").`);
+    }
+    const backendRaw = args.backend ? String(args.backend).toLowerCase() : undefined;
+    if (backendRaw && backendRaw !== "bedrock" && backendRaw !== "anthropic") {
+      throw new Error(`Invalid --backend "${backendRaw}" (expected "bedrock" or "anthropic").`);
+    }
+    // The runtime/backend/provider invariants (tack ⇒ bedrock, anthropic backend ⇒
+    // provider anthropic + runtime claude + apiModelId, bedrock ⇒ inferenceProfile)
+    // are still enforced by normalizeModel in addModelToConfig, before write.
+    const runtime = runtimeRaw as "claude" | "tack" | undefined;
+    const backend = backendRaw as "bedrock" | "anthropic" | undefined;
 
     // Resolve the aws-profile discovery authenticates as: an explicit --aws-profile
     // key, else the config's aws.default (so `tack model add` uses the same identity
@@ -579,7 +600,8 @@ const modelAdd = defineCommand({
         name,
         version,
         provider,
-        backend: "anthropic",
+        ...(runtime ? { runtime } : {}),
+        backend: backend ?? "anthropic",
         apiModelId: String(args["api-model-id"]),
         ...(pricing ? { pricing } : {}),
       };
@@ -593,6 +615,8 @@ const modelAdd = defineCommand({
         name,
         version,
         provider: providerFlag,
+        ...(runtime ? { runtime } : {}),
+        ...(backend ? { backend } : {}),
         inferenceProfile: String(args["inference-profile"]),
         ...(awsProfileKey ? { awsProfile: awsProfileKey } : {}),
         ...(pricing ? { pricing } : {}),
@@ -628,6 +652,8 @@ const modelAdd = defineCommand({
         name,
         version,
         provider: binding.provider,
+        ...(runtime ? { runtime } : {}),
+        ...(backend ? { backend } : {}),
         inferenceProfile: binding.inferenceProfile,
         ...(awsProfileKey ? { awsProfile: awsProfileKey } : {}),
         ...(pricing ? { pricing } : {}),
@@ -638,11 +664,11 @@ const modelAdd = defineCommand({
     // Re-load so a config that no longer parses surfaces immediately.
     await loadConfig();
 
-    const runtime = added.runtime ?? (added.provider === "anthropic" ? "claude" : "tack");
+    const effectiveRuntime = added.runtime ?? (added.provider === "anthropic" ? "claude" : "tack");
     console.log(pc.green(`Added model ${pc.bold(`${added.name}@${added.version}`)}`) + pc.dim(`  ${added.provider}`));
     const target = added.backend === "anthropic" ? added.apiModelId : added.inferenceProfile;
     console.log(pc.dim(`  ${target ?? ""}`));
-    if (runtime === "tack" && !added.pricing) {
+    if (effectiveRuntime === "tack" && !added.pricing) {
       console.log(
         pc.yellow(
           "  note: no pricing set — cost won't be computed for this tack-runtime model. " +
