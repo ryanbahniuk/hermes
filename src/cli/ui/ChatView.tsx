@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Static, Text, useInput } from "ink";
+import { Box, Text, useInput } from "ink";
 import { listRunsBySession, sessionTotalCost, type RunRow, type SessionCost } from "../../db";
 import type { PlannerEvent } from "../../planner/runtime";
 import type { PlannerSession } from "../../planner/session";
@@ -7,6 +7,7 @@ import { Horse } from "./Horse";
 import { Prompt } from "./Prompt";
 import { runLive, usd } from "./theme";
 import { createTurnQueue, type TurnQueue } from "./turnQueue";
+import { useTerminalSize } from "./useTerminalSize";
 
 // ---- transcript model -----------------------------------------------------
 
@@ -121,9 +122,12 @@ export interface ChatViewProps {
 }
 
 /**
- * The interactive planning conversation. The committed transcript scrolls in an
- * Ink `<Static>` region (written once, never redrawn); the in-flight turn, the
- * galloping-horse spinner, and the input line live in the dynamic region below.
+ * The interactive planning conversation, rendered fullscreen in the alternate
+ * screen buffer. The horse + its ground (grass) are pinned to the very bottom of
+ * the viewport; the transcript scrolls INTERNALLY in the space above them and can
+ * never grow down far enough to overlap the horse. This trades the terminal's
+ * native scrollback for a self-contained, always-visible horse — a deliberate
+ * choice. The transcript auto-follows the newest output.
  */
 export function ChatView({ session, onExit, history = [], embedded = false }: ChatViewProps): React.ReactElement {
   const idRef = useRef(0);
@@ -161,6 +165,7 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
   const [queued, setQueued] = useState<string[]>([]);
   const [cost, setCost] = useState<SessionCost>(() => sessionTotalCost(session.id));
   const [workersRunning, setWorkersRunning] = useState(false);
+  const { columns, rows } = useTerminalSize();
 
   // Background worker runs mutate the DB out of band, so the gallop can't be
   // driven off local turn state — it must reflect whether any dispatched run is
@@ -249,30 +254,40 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
     ? `Esc back to dashboard · /runs /help /exit · ${usd(cost.total)}`
     : `/runs · /help · /exit · Ctrl-C to quit · ${usd(cost.total)}`;
 
-  return (
-    <Box flexDirection="column">
-      <Static items={committed}>{(line) => <LineView key={line.id} line={line} />}</Static>
+  // The committed transcript plus the in-flight turn form one scroll stream that
+  // auto-follows the newest line. We only keep the tail that could possibly be
+  // visible — the scroll region below clips the rest — which bounds layout work
+  // on long sessions without changing what the user sees.
+  const transcript = [...committed, ...live];
+  const visible = transcript.slice(-Math.max(rows, 40));
+  const separator = "─".repeat(Math.max(0, columns));
 
-      <Box flexDirection="column">
-        {live.map((line) => (
+  return (
+    <Box flexDirection="column" height={rows} width={columns}>
+      {/* Transcript scroll region: fills the space above the pinned horse. It
+          pins its content to the bottom (justifyContent flex-end) and hides the
+          overflow, so the newest lines stay in view and the oldest scroll off
+          the top — the horse below is never pushed off-screen. */}
+      <Box flexGrow={1} flexDirection="column" overflow="hidden" justifyContent="flex-end">
+        {visible.map((line) => (
           <LineView key={line.id} line={line} />
         ))}
-        <Box marginTop={live.length > 0 ? 1 : 0}>
-          <Horse running={workersRunning} />
-        </Box>
-        {queued.length > 0 && (
-          <Box flexDirection="column">
-            {queued.map((text, i) => (
-              <Text key={i} dimColor>
-                {"  queued: " + text}
-              </Text>
-            ))}
-          </Box>
-        )}
+      </Box>
+
+      {/* The pinned bottom region: a full-width rule separates it from the chat,
+          then the prompt/footer sit just above the horse, which grazes on its
+          full-width grass at the very bottom of the viewport. */}
+      <Box flexShrink={0} flexDirection="column">
+        <Text dimColor>{separator}</Text>
+        {queued.length > 0 &&
+          queued.map((text, i) => (
+            <Text key={i} dimColor>
+              {"  queued: " + text}
+            </Text>
+          ))}
         <Prompt onSubmit={handleSubmit} isActive placeholder="ask the planner…" />
-        <Box marginTop={1}>
-          <Text dimColor>{footer}</Text>
-        </Box>
+        <Text dimColor>{footer}</Text>
+        <Horse running={workersRunning} />
       </Box>
     </Box>
   );

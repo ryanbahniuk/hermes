@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
 import { Box, Text } from "ink";
+import { useTerminalSize } from "./useTerminalSize";
 
 // Two gaits: while idle the horse grazes in place; while work is loading it
 // breaks into a gallop that canters across the line via a bobbing offset, with
 // a single caption chosen when the gallop starts.
 const FRAME_MS = 160;
+
+// The silhouettes below are the horse BODY only. The ground it stands on is a
+// separate full-width grass line (see GRASS_UNIT / grassLine), rendered beneath
+// the body so it can span the whole terminal instead of a fixed-width stub.
 
 // Head down, mid-stride — used while loading.
 const GALLOP = [
@@ -16,14 +21,26 @@ const GALLOP = [
   "   `   \\     \\",
 ];
 
-// Head down at the grass by a fence — used while idle/waiting.
-const GRAZE = [
-  "       _ ____",
-  "     /( ) _   \\",
-  "    / //   /\\` \\,  ||--||--||-",
-  "      \\|   |/  \\|  ||--||--||-",
-  "~^~^~^~~^~~~^~~^^~^^^^^^^^^^^^",
+// Head down at the grass by a fence. The fence stands to the LEFT of the horse,
+// with the horse body grazing to its right.
+export const GRAZE = [
+  "                _ ____",
+  "              /( ) _   \\,",
+  "||--||--||-  / //   /\\` \\,",
+  "||--||--||-    \\|   |/  \\|",
 ];
+
+// One tile of ground; grassLine repeats it to fill the terminal width.
+export const GRASS_UNIT = "~^";
+
+/**
+ * The grass ground line, tiled to exactly `width` columns (never wider, so it
+ * can't wrap and jitter on resize). A width of 0 or less yields an empty line.
+ */
+export function grassLine(width: number, unit: string = GRASS_UNIT): string {
+  if (width <= 0 || unit.length === 0) return "";
+  return unit.repeat(Math.ceil(width / unit.length)).slice(0, width);
+}
 
 const OFFSETS = [0, 1, 2, 3, 2, 1];
 
@@ -65,7 +82,8 @@ export const CAPTIONS = [
 ];
 
 /**
- * A horse that grazes while idle and gallops while loading.
+ * A horse that grazes while idle and gallops while loading. In both gaits it
+ * stands on a full-width grass line so the ground spans the terminal.
  * @param running when true, the horse gallops with a single caption chosen when
  *   the gallop starts; when false it stands and grazes.
  * @param caption when supplied, overrides the random caption for the gallop.
@@ -77,6 +95,7 @@ export function Horse({
   running?: boolean;
   caption?: string;
 }): React.ReactElement {
+  const { columns } = useTerminalSize();
   const [frame, setFrame] = useState(0);
   // Index into CAPTIONS, re-rolled each time the horse breaks into a gallop.
   const [captionIdx, setCaptionIdx] = useState(() =>
@@ -91,6 +110,9 @@ export function Horse({
     return () => clearInterval(timer);
   }, [running]);
 
+  // The ground is fixed to the terminal width and never bobs with the gait.
+  const grass = grassLine(columns);
+
   if (!running) {
     return (
       <Box flexDirection="column">
@@ -99,6 +121,9 @@ export function Horse({
             {line}
           </Text>
         ))}
+        <Text color="yellow" wrap="truncate">
+          {grass}
+        </Text>
         <Text color="yellow" dimColor>
           {"  "}grazin'…
         </Text>
@@ -117,6 +142,9 @@ export function Horse({
           {line}
         </Text>
       ))}
+      <Text color="yellow" wrap="truncate">
+        {grass}
+      </Text>
       <Text color="yellow" dimColor>
         {pad}
         {"  "}
