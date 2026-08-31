@@ -15,6 +15,7 @@ import {
   touchSessionHeartbeat,
   type SessionRow,
 } from "../db";
+import { appendLog, sessionLogFile } from "../logging/logs";
 import { createPlannerActions } from "./actions";
 import {
   selectPlannerRuntime,
@@ -31,6 +32,12 @@ import { prompts } from "../prompts";
  * stale — keep the two in step if you change this.
  */
 const HEARTBEAT_INTERVAL_MS = 15_000;
+
+/** Compact one-line rendering of a tool input for the session log. */
+function shortJSON(input: unknown): string {
+  const s = typeof input === "string" ? input : JSON.stringify(input ?? {});
+  return s.length > 160 ? `${s.slice(0, 160)}…` : s;
+}
 
 /** A live planning conversation bound to one persisted session + one runtime instance. */
 export class PlannerSession {
@@ -124,11 +131,21 @@ export class PlannerSession {
     const tokens: TokenTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     let runtimeCost: number | undefined;
     const assistantParts: string[] = [];
+    const logFile = sessionLogFile(this.id);
+    appendLog(logFile, `you › ${text.replace(/\s+/g, " ")}`);
 
     for await (const ev of this.runtime.send(text)) {
       switch (ev.type) {
         case "text":
           assistantParts.push(ev.text);
+          break;
+        // Tool activity is dropped from the chat view; the session log is its
+        // only durable home, so record every call and result here.
+        case "tool_call":
+          appendLog(logFile, `→ ${ev.tool}(${shortJSON(ev.input)})`);
+          break;
+        case "tool_result":
+          appendLog(logFile, `← ${ev.ok ? "" : "ERR "}${ev.preview.replace(/\s+/g, " ")}`);
           break;
         case "usage":
           tokens.input += ev.inputTokens;
@@ -147,7 +164,10 @@ export class PlannerSession {
     }
 
     const reply = assistantParts.join("\n").trim();
-    if (reply) addSessionMessage({ sessionId: this.id, role: "assistant", content: reply });
+    if (reply) {
+      addSessionMessage({ sessionId: this.id, role: "assistant", content: reply });
+      appendLog(logFile, `assistant › ${reply.replace(/\s+/g, " ")}`);
+    }
 
     // Cost: claude reports it directly; tack derives it from tokens + pricing.
     const delta =

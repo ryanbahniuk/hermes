@@ -23,6 +23,15 @@ export function taskLogFile(runId: string, taskId: string): string {
   return join(runLogDir(runId), `${taskId}.log`);
 }
 
+export function sessionLogDir(): string {
+  return join(LOGS_DIR, "sessions");
+}
+
+/** Full transcript log for a planning session — including tool calls, which the chat view no longer renders. */
+export function sessionLogFile(sessionId: string): string {
+  return join(sessionLogDir(), `${sessionId}.log`);
+}
+
 export function ensureRunLogDir(runId: string): void {
   mkdirSync(runLogDir(runId), { recursive: true });
 }

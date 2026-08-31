@@ -14,17 +14,10 @@ import { useTerminalSize } from "./useTerminalSize";
 type Line =
   | { id: string; kind: "user"; text: string }
   | { id: string; kind: "assistant"; text: string }
-  | { id: string; kind: "tool_call"; tool: string; input: string }
-  | { id: string; kind: "tool_result"; ok: boolean; preview: string }
   | { id: string; kind: "error"; message: string }
   | { id: string; kind: "notice"; text: string }
   | { id: string; kind: "cost"; cost: SessionCost }
   | { id: string; kind: "runs"; runs: RunRow[] };
-
-function shortJSON(input: unknown): string {
-  const s = typeof input === "string" ? input : JSON.stringify(input ?? {});
-  return s.length > 160 ? `${s.slice(0, 160)}…` : s;
-}
 
 /** One transcript line. Kept dumb: every visual decision lives here. */
 function LineView({ line }: { line: Line }): React.ReactElement | null {
@@ -38,21 +31,6 @@ function LineView({ line }: { line: Line }): React.ReactElement | null {
       );
     case "assistant":
       return <Text>{line.text}</Text>;
-    case "tool_call":
-      return (
-        <Text dimColor>
-          {"  → "}
-          {line.tool}({line.input})
-        </Text>
-      );
-    case "tool_result":
-      return (
-        <Text dimColor>
-          {"  ← "}
-          {line.ok ? "" : "ERR "}
-          {line.preview.replace(/\s+/g, " ")}
-        </Text>
-      );
     case "error":
       return <Text color="red">{"  error: " + line.message}</Text>;
     case "notice":
@@ -98,10 +76,8 @@ function eventToLine(ev: PlannerEvent, id: string): Line | null {
       const t = ev.text.trim();
       return t ? { id, kind: "assistant", text: t } : null;
     }
-    case "tool_call":
-      return { id, kind: "tool_call", tool: ev.tool, input: shortJSON(ev.input) };
-    case "tool_result":
-      return { id, kind: "tool_result", ok: ev.ok, preview: ev.preview };
+    // Tool calls/results are intentionally omitted from the chat view — they are
+    // recorded in the session log instead (see PlannerSession.sendTurn).
     case "error":
       return { id, kind: "error", message: ev.message };
     default:
@@ -127,7 +103,9 @@ export interface ChatViewProps {
  * the viewport; the transcript scrolls INTERNALLY in the space above them and can
  * never grow down far enough to overlap the horse. This trades the terminal's
  * native scrollback for a self-contained, always-visible horse — a deliberate
- * choice. The transcript auto-follows the newest output.
+ * choice. The transcript auto-follows the newest output by default, and PgUp/
+ * PgDn or ↑/↓ scroll back through history (anchored by line id so streaming
+ * output doesn't yank the view).
  */
 export function ChatView({ session, onExit, history = [], embedded = false }: ChatViewProps): React.ReactElement {
   const idRef = useRef(0);
@@ -167,6 +145,14 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
   const [workersRunning, setWorkersRunning] = useState(false);
   const { columns, rows } = useTerminalSize();
 
+  // Scroll-back state. `anchor` is the id of the transcript line pinned to the
+  // bottom of the viewport; `null` means "follow" — stay pinned to the latest
+  // output. Anchoring by line id (not offset) keeps the view still while new
+  // lines stream in below. `scrollRef` gives the key handler the current
+  // transcript + layout without re-subscribing useInput every render.
+  const [anchor, setAnchor] = useState<string | null>(null);
+  const scrollRef = useRef<{ ids: string[]; page: number }>({ ids: [], page: 1 });
+
   // Background worker runs mutate the DB out of band, so the gallop can't be
   // driven off local turn state — it must reflect whether any dispatched run is
   // still live. Poll the runs table and re-render as runs start and finish.
@@ -182,8 +168,30 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
     return () => clearInterval(timer);
   }, [session.id]);
 
+  // Scroll keys are handled here rather than in the always-active Prompt so they
+  // never leak into the input buffer. Only non-printable keys are used (Prompt
+  // types every printable character), so PgUp/PgDn and ↑/↓ are safe.
   useInput((_input, key) => {
-    if (key.escape && !busy) onExit();
+    if (key.escape && !busy) return void onExit();
+
+    const { ids, page } = scrollRef.current;
+    const len = ids.length;
+    if (len === 0) return;
+
+    // Move the pinned-bottom line by `delta` lines (negative = scroll up toward
+    // older output). Landing on the last line resumes follow mode (anchor null).
+    const scrollBy = (delta: number) => {
+      setAnchor((cur) => {
+        const bottom = cur === null ? len - 1 : Math.max(0, ids.indexOf(cur));
+        const next = Math.min(len - 1, Math.max(0, bottom + delta));
+        return next >= len - 1 ? null : ids[next];
+      });
+    };
+
+    if (key.pageUp) return scrollBy(-page);
+    if (key.pageDown) return scrollBy(page);
+    if (key.upArrow) return scrollBy(-1);
+    if (key.downArrow) return scrollBy(1);
   });
 
   const append = (...lines: Line[]) => setCommitted((prev) => [...prev, ...lines]);
@@ -231,6 +239,9 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
     const text = raw.trim();
     if (!text) return;
 
+    // Any submission snaps the transcript back to the latest output.
+    setAnchor(null);
+
     // Local, read-only slash commands are handled inline and must fire
     // immediately — even mid-turn — so they are never queued.
     if (text === "/exit" || text === "/quit") return void onExit();
@@ -251,23 +262,37 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
   }
 
   const footer = embedded
-    ? `Esc back to dashboard · /runs /help /exit · ${usd(cost.total)}`
-    : `/runs · /help · /exit · Ctrl-C to quit · ${usd(cost.total)}`;
+    ? `Esc back · PgUp/PgDn scroll · /runs /help /exit · ${usd(cost.total)}`
+    : `/runs · /help · /exit · PgUp/PgDn scroll · Ctrl-C to quit · ${usd(cost.total)}`;
 
-  // The committed transcript plus the in-flight turn form one scroll stream that
-  // auto-follows the newest line. We only keep the tail that could possibly be
-  // visible — the scroll region below clips the rest — which bounds layout work
-  // on long sessions without changing what the user sees.
+  // Transcript = committed history + the in-flight turn, as one scroll stream.
+  // Follow mode (anchor === null) pins to the newest line; when scrolled up,
+  // `anchor` is the id of the line held at the bottom edge, and `newerBelow`
+  // reveals how much output is hidden below the fold. Anchoring by line id keeps
+  // the view still while new lines stream in during a turn.
   const transcript = [...committed, ...live];
-  const visible = transcript.slice(-Math.max(rows, 40));
+  const len = transcript.length;
+  const anchorIdx = anchor === null ? -1 : transcript.findIndex((l) => l.id === anchor);
+  const endIdx = anchorIdx >= 0 ? anchorIdx + 1 : len; // exclusive slice bound
+  const newerBelow = endIdx < len;
+
+  // Only render the tail that could be visible; the scroll region below clips
+  // the rest via flexbox (overflow hidden + flex-end), which bounds layout work
+  // on long sessions. The window ends at the anchor (or the latest line).
+  const windowSize = Math.max(rows, 40);
+  const visible = transcript.slice(Math.max(0, endIdx - windowSize), endIdx);
   const separator = "─".repeat(Math.max(0, columns));
+
+  // Hand the key handler the current line ids and paging math.
+  scrollRef.current = { ids: transcript.map((l) => l.id), page: Math.max(1, rows - 4) };
 
   return (
     <Box flexDirection="column" height={rows} width={columns}>
       {/* Transcript scroll region: fills the space above the pinned horse. It
           pins its content to the bottom (justifyContent flex-end) and hides the
           overflow, so the newest lines stay in view and the oldest scroll off
-          the top — the horse below is never pushed off-screen. */}
+          the top — the horse below is never pushed off-screen. When scrolled
+          back, the window ends at the anchor line instead of the latest. */}
       <Box flexGrow={1} flexDirection="column" overflow="hidden" justifyContent="flex-end">
         {visible.map((line) => (
           <LineView key={line.id} line={line} />
@@ -279,6 +304,9 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
           full-width grass at the very bottom of the viewport. */}
       <Box flexShrink={0} flexDirection="column">
         <Text dimColor>{separator}</Text>
+        {newerBelow && (
+          <Text dimColor>{`  ⋯ ${len - endIdx} newer line(s) below · PgDn/↓ to catch up`}</Text>
+        )}
         {queued.length > 0 &&
           queued.map((text, i) => (
             <Text key={i} dimColor>
