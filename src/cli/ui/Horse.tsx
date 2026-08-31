@@ -1,14 +1,31 @@
 import { useEffect, useState } from "react";
 import { Box, Text } from "ink";
 
-// The galloping horse: a body glyph, a cycling leg pose, and a bobbing
-// horizontal offset so it canters across the line. Ported from the old
-// stdout-frame animation into a self-contained Ink component.
-const FRAME_MS = 130;
+// Two gaits: while idle the horse grazes in place; while work is loading it
+// breaks into a gallop that canters across the line via a bobbing offset, with
+// a rotating caption alongside.
+const FRAME_MS = 160;
 const CAPTION_MS = 1700;
 
-const BODY = "▄▟██▛▜";
-const LEG_POSES = ["╱ ╲", "▏ ▕", "╲ ╱", "▏ ▕"];
+// Head down, mid-stride — used while loading.
+const GALLOP = [
+  "            .''",
+  "  ._.-.___.' (`\\",
+  " //(        ( `'",
+  "'/ )\\ ).__. ) ",
+  "' <' `\\ ._/'\\",
+  "   `   \\     \\",
+];
+
+// Head down at the grass by a fence — used while idle/waiting.
+const GRAZE = [
+  "       _ ____",
+  "     /( ) _   \\",
+  "    / //   /\\` \\,  ||--||--||-",
+  "      \\|   |/  \\|  ||--||--||-",
+  "~^~^~^~~^~~~^~~^^~^^^^^^^^^^^^",
+];
+
 const OFFSETS = [0, 1, 2, 3, 2, 1];
 
 const CAPTIONS = [
@@ -21,34 +38,62 @@ const CAPTIONS = [
   "kickin' up dust…",
 ];
 
-/** A looping galloping-horse spinner with a rotating caption. */
-export function Horse({ caption }: { caption?: string }): React.ReactElement {
+/**
+ * A horse that grazes while idle and gallops while loading.
+ * @param running when true, the horse gallops with a rotating caption; when
+ *   false it stands and grazes.
+ */
+export function Horse({
+  running = true,
+  caption,
+}: {
+  running?: boolean;
+  caption?: string;
+}): React.ReactElement {
   const [frame, setFrame] = useState(0);
   const [captionIdx, setCaptionIdx] = useState(0);
 
   useEffect(() => {
+    if (!running) return; // grazing is still; no per-frame animation needed
     const timer = setInterval(() => setFrame((f) => f + 1), FRAME_MS);
     return () => clearInterval(timer);
-  }, []);
+  }, [running]);
 
   useEffect(() => {
-    if (caption) return; // a fixed caption was supplied; don't rotate
+    if (!running || caption) return; // idle, or a fixed caption was supplied
     const timer = setInterval(() => setCaptionIdx((i) => i + 1), CAPTION_MS);
     return () => clearInterval(timer);
-  }, [caption]);
+  }, [running, caption]);
 
-  const legs = LEG_POSES[frame % LEG_POSES.length];
+  if (!running) {
+    return (
+      <Box flexDirection="column">
+        {GRAZE.map((line, i) => (
+          <Text key={i} color="yellow">
+            {line}
+          </Text>
+        ))}
+        <Text color="yellow" dimColor>
+          {"  "}grazin'…
+        </Text>
+      </Box>
+    );
+  }
+
   const pad = " ".repeat(OFFSETS[frame % OFFSETS.length]);
   const text = caption ?? CAPTIONS[captionIdx % CAPTIONS.length];
 
   return (
-    <Box>
-      <Text color="yellow">
-        {pad}
-        {BODY} {legs}
-      </Text>
-      <Text> </Text>
+    <Box flexDirection="column">
+      {GALLOP.map((line, i) => (
+        <Text key={i} color="yellow">
+          {pad}
+          {line}
+        </Text>
+      ))}
       <Text color="yellow" dimColor>
+        {pad}
+        {"  "}
         {text}
       </Text>
     </Box>

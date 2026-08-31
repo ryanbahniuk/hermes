@@ -216,11 +216,10 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
         {live.map((line) => (
           <LineView key={line.id} line={line} />
         ))}
-        {busy ? (
-          <Box marginTop={live.length > 0 ? 1 : 0}>
-            <Horse />
-          </Box>
-        ) : (
+        <Box marginTop={live.length > 0 ? 1 : 0}>
+          <Horse running={busy} />
+        </Box>
+        {!busy && (
           <Prompt onSubmit={handleSubmit} isActive placeholder="ask the planner…" />
         )}
         <Box marginTop={1}>
