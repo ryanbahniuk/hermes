@@ -143,9 +143,31 @@ both.
    instead of Bedrock). Pass `--aws-profile <key>` (a key from `tack aws list`)
    to bind the model to a specific account/region — discovery then authenticates
    as that profile (driving `aws sso login` if needed) and the entry is tagged so
-   it always runs there. Add `--input-price`/`--output-price` (USD per 1M tokens)
-   for non-Anthropic models so cost can be computed. Remove one with
-   `tack model remove <name> [version]`.
+   it always runs there. For a **bedrock** model, `tack model add` **auto-fetches**
+   pricing so cost can be computed: it pulls the model's on-demand rates from the
+   AWS Price List API and hands the raw products to your `summaryModel` to match
+   them to the model (no brittle attribute parser), then writes the resolved per-1M
+   `pricing` into the entry. Resolved rates are cached in
+   `~/.tack/pricing-cache.json`; `tack model price refresh` re-fetches for **every**
+   bedrock model and rewrites their `pricing` (needs a bedrock-backed
+   `defaults.summaryModel`). To set a rate by hand, edit the entry's `pricing` in
+   `~/.tack/tack.config.ts`. Remove a model with `tack model remove <name> [version]`.
+
+   > Cost precedence at runtime is unchanged: the `claude` runtime uses the Claude
+   > SDK's reported USD; the `tack` runtime multiplies tokens by this `pricing`.
+   > These Price-List rates are **list price** (no negotiated discounts) — a good
+   > estimate, not your invoice.
+
+   One `name@version` can be registered under **multiple variants** — a model's
+   identity is the full `(name, version, runtime, backend)` tuple. Run
+   `tack model add` again with a different `--runtime`/`--backend` to expose, say,
+   both the first-party `anthropic` backend and a `bedrock`/`tack` path for the
+   same model. When several variants share a `name@version`, reference a specific
+   one by appending `+<qualifier>` suffixes — a backend and/or runtime,
+   order-independent: `claude-sonnet@4.5+anthropic`, `claude-sonnet@4.5+bedrock+tack`.
+   An under-specified reference that matches more than one variant fails and lists
+   the choices rather than guessing; `tack model remove`/`verify` also take
+   `--runtime`/`--backend` to pin one.
 
    Add `--verify` to actually invoke each model with a minimal prompt and confirm
    which ones work for *your* profile — native models via the Bedrock Converse API,
@@ -295,7 +317,10 @@ tack model list
 tack model discover       # discover invokable Bedrock + Mantle models and their targets
 tack model discover --verify  # …and probe each to confirm it works for your profile
 tack model add <name> <version> --model-id <id>   # register one (inference profile auto-resolved)
-tack model remove <name> [version]                # unregister a model
+                                                   # …add again with --runtime/--backend to register
+                                                   #   another variant of the same name@version
+tack model remove <name> [version] [--runtime R] [--backend B]  # unregister (pin a variant when several)
+tack model price refresh   # re-fetch on-demand pricing for all bedrock models (AWS Price List)
 tack model set-default planner <name[@version]>     # fallback planner model
 tack model set-default implementer <name[@version]> # fallback implementer model
 tack model set implementer <name[@version]>         # hard pin (overrides routing)

@@ -383,8 +383,15 @@ runs.session_id  text       -- nullable; links a delegated swarm back to its ses
     identity this model authenticates through; falls back to `aws.default`.
 - The supervisor resolves a task's model → registry entry → runtime + backend + target +
   resolved aws profile (`{ profile, account?, region? }`).
-- **Selection:** register two entries to expose both paths for one model, or override per run
-  with `--backend <bedrock|anthropic>`.
+- **Variants & selection:** a model's identity is the full `(name, version, runtime, backend)`
+  tuple, so one `name@version` may be registered under **several variants** — e.g. an
+  `anthropic` backend alongside a `bedrock`/`tack` one, or the same model on `bedrock` under
+  both the `claude` and `tack` runtimes. A reference disambiguates by appending `+<qualifier>`
+  suffixes (a backend and/or a runtime, order-independent): `claude-sonnet@4.5+anthropic`,
+  `claude-sonnet@4.5+bedrock+tack`. Resolution is **explicit** — an under-specified reference
+  that still matches more than one variant fails and lists the qualified refs to pick from,
+  rather than guessing. `--runtime`/`--backend` flags (on `tack model verify`, `tack model
+  remove`) are an equivalent override.
 - **AWS profiles (`aws.profiles` + `aws.default`):** named identities, each `{ profile,
   account?, region? }`. A bedrock model's `awsProfile` selects one; both credential paths (JS
   SDK and the Claude SDK subprocess) are pinned to it, so **different models can run in
@@ -398,6 +405,21 @@ runs.session_id  text       -- nullable; links a delegated swarm back to its ses
 - **Credentials:** `bedrock` → the model's aws profile, else the default AWS credential chain
   (SSO profiles expected); `anthropic` → `ANTHROPIC_API_KEY` **from the environment, never
   stored in the config file**.
+- **Pricing & cost:** the `claude` runtime reports USD directly (the Claude SDK's
+  `total_cost_usd`); the `tack` runtime reports only tokens, so its cost is `tokens × pricing`
+  (per-1M rates on the model entry). For a **bedrock** model that `pricing` is populated
+  automatically: `tack model add` (and `tack model price refresh`, which does every bedrock
+  model) fetches the model's **on-demand rates from the AWS Price List API** (`pricing:GetProducts`,
+  `ServiceCode=AmazonBedrock`, filtered by `regionCode`; the client is pinned to `us-east-1`
+  since the API only serves there). Rather than a brittle attribute parser, the raw trimmed
+  products are handed to the configured `summaryModel`, which matches them to the model's
+  name/version and normalizes units to per-1M — mirroring how the `claude` runtime carries a
+  bundled price table, but sourced live. Resolved rates are cached in
+  `~/.tack/pricing-cache.json` (keyed by `region|provider|name@version`, 7-day freshness for
+  non-forced resolves; `refresh` forces). These are **list** prices — an estimate, not a
+  negotiated-rate invoice. A hand-set `pricing` on the entry is used at runtime (until the next
+  `refresh` overwrites it). A failed/absent match leaves the model unpriced (cost falls back to
+  `$0`).
 
 > **Operational note (two credential paths):** the `claude` runtime resolves AWS creds via
 > the Claude Agent SDK's bundled CLI (Tack passes it `AWS_PROFILE`/`AWS_REGION` derived from

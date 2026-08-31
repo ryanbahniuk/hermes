@@ -7,6 +7,7 @@ import {
   removeProjectFromConfig,
   addModelToConfig,
   removeModelFromConfig,
+  updateModelPricing,
   setSectionModel,
   clearSectionModel,
   addAwsProfileToConfig,
@@ -17,6 +18,13 @@ import {
 } from "../src/config/edit";
 import type { AwsProfile, ModelInput, Pricing } from "../src/config/schema";
 import { resolveModel } from "../src/models/registry";
+import {
+  resolvePricing,
+  resolveSummaryModel,
+  pricingCacheKey,
+  type PricingTarget,
+} from "../src/models/pricing";
+import { defaultRegion } from "../src/models/chat";
 import {
   ensureAuth,
   resolveAwsProfile,
@@ -491,13 +499,15 @@ const modelSet = definePointerCommand({
   description: "Pin a planner/implementer/summary model, overriding intelligent routing",
 });
 
-/** Parses a `--input-price`/`--output-price` string into a nonnegative number. */
-function parsePrice(value: unknown, flag: string): number {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) {
-    throw new Error(`Invalid ${flag}: "${String(value)}" (expected a nonnegative number).`);
-  }
-  return n;
+/** One-line "in $X out $Y (cacheR $Z cacheW $W)" rendering of per-1M pricing. */
+function formatPricing(p: Pricing): string {
+  const parts = [
+    p.inputPer1M !== undefined ? `in $${p.inputPer1M}` : undefined,
+    p.outputPer1M !== undefined ? `out $${p.outputPer1M}` : undefined,
+    p.cacheReadPer1M !== undefined ? `cacheR $${p.cacheReadPer1M}` : undefined,
+    p.cacheWritePer1M !== undefined ? `cacheW $${p.cacheWritePer1M}` : undefined,
+  ].filter(Boolean);
+  return parts.length ? `${parts.join(" ")} /1M` : "(empty)";
 }
 
 const modelAdd = defineCommand({
@@ -533,8 +543,6 @@ const modelAdd = defineCommand({
       type: "string",
       description: "Use the first-party Anthropic API backend with this model id (no Bedrock; needs ANTHROPIC_API_KEY)",
     },
-    "input-price": { type: "string", description: "Pricing: USD per 1M input tokens (tack runtime)" },
-    "output-price": { type: "string", description: "Pricing: USD per 1M output tokens (tack runtime)" },
     region: { type: "string", description: "AWS region for discovery (defaults to the aws profile's region, AWS_REGION, or us-east-1)" },
     profile: { type: "string", description: "Low-level AWS named profile for discovery (prefer --aws-profile)" },
     "aws-profile": {
@@ -579,17 +587,10 @@ const modelAdd = defineCommand({
       }
     }
 
-    const inputPrice = args["input-price"];
-    const outputPrice = args["output-price"];
-    let pricing: Pricing | undefined;
-    if (inputPrice !== undefined || outputPrice !== undefined) {
-      pricing = {
-        ...(inputPrice !== undefined ? { inputPer1M: parsePrice(inputPrice, "--input-price") } : {}),
-        ...(outputPrice !== undefined ? { outputPer1M: parsePrice(outputPrice, "--output-price") } : {}),
-      };
-    }
-
     let entry: ModelInput;
+    // The foundation model id, when discovery resolved one — passed to the price
+    // matcher as an extra hint (config entries otherwise only carry name/version).
+    let discoveredModelId: string | undefined;
     if (args["api-model-id"]) {
       // First-party Anthropic API backend — no Bedrock discovery needed.
       if (awsProfileKey) {
@@ -602,9 +603,7 @@ const modelAdd = defineCommand({
         provider,
         ...(runtime ? { runtime } : {}),
         backend: backend ?? "anthropic",
-        apiModelId: String(args["api-model-id"]),
-        ...(pricing ? { pricing } : {}),
-      };
+        apiModelId: String(args["api-model-id"]),      };
     } else if (args["inference-profile"]) {
       // Explicit target — skip discovery. Provider can't be inferred reliably
       // from an inference-profile id (it's prefixed by region), so require it.
@@ -618,9 +617,7 @@ const modelAdd = defineCommand({
         ...(runtime ? { runtime } : {}),
         ...(backend ? { backend } : {}),
         inferenceProfile: String(args["inference-profile"]),
-        ...(awsProfileKey ? { awsProfile: awsProfileKey } : {}),
-        ...(pricing ? { pricing } : {}),
-      };
+        ...(awsProfileKey ? { awsProfile: awsProfileKey } : {}),      };
     } else {
       // The common path: resolve the inference profile automatically. Discovery
       // authenticates as the chosen aws profile (its account/region) so the
@@ -648,6 +645,7 @@ const modelAdd = defineCommand({
         profile,
       });
       console.error(pc.dim(`# matched ${binding.modelId} → ${binding.inferenceProfile}`));
+      discoveredModelId = binding.modelId;
       entry = {
         name,
         version,
@@ -655,9 +653,41 @@ const modelAdd = defineCommand({
         ...(runtime ? { runtime } : {}),
         ...(backend ? { backend } : {}),
         inferenceProfile: binding.inferenceProfile,
-        ...(awsProfileKey ? { awsProfile: awsProfileKey } : {}),
-        ...(pricing ? { pricing } : {}),
-      };
+        ...(awsProfileKey ? { awsProfile: awsProfileKey } : {}),      };
+    }
+
+    // Auto-fetch on-demand pricing for a bedrock model: the AWS Price List API +
+    // the summary model match rates to this model. Non-fatal: a failure just
+    // leaves it unpriced.
+    if (entry.inferenceProfile) {
+      try {
+        const config = await loadConfig();
+        const region =
+          awsProfile?.region ?? (args.region as string | undefined) ?? defaultRegion();
+        const target: PricingTarget = {
+          key: `${name}@${version}`,
+          name,
+          version,
+          provider: entry.provider,
+          region,
+          modelId: discoveredModelId,
+        };
+        console.error(pc.dim("# fetching on-demand pricing (AWS Price List + summary model)…"));
+        const priced = await resolvePricing(config, [target], {
+          log: (line) => console.error(pc.dim(`# ${line}`)),
+        });
+        const p = priced.get(target.key);
+        if (p) {
+          entry = { ...entry, pricing: p };
+          console.error(pc.dim(`# priced: ${formatPricing(p)}`));
+        } else {
+          console.error(
+            pc.yellow("# no confident price match — leaving pricing unset (rerun `tack model price refresh` later)."),
+          );
+        }
+      } catch (err) {
+        console.error(pc.yellow(`# pricing lookup skipped: ${(err as Error).message}`));
+      }
     }
 
     const added = await addModelToConfig(entry);
@@ -672,9 +702,11 @@ const modelAdd = defineCommand({
       console.log(
         pc.yellow(
           "  note: no pricing set — cost won't be computed for this tack-runtime model. " +
-            "Re-add with --input-price/--output-price.",
+            "Try `tack model price refresh`.",
         ),
       );
+    } else if (added.pricing) {
+      console.log(pc.dim(`  pricing: ${formatPricing(added.pricing)}`));
     }
     console.log(pc.dim(`  ${CONFIG_PATH}`));
   }),
@@ -685,11 +717,25 @@ const modelRemove = defineCommand({
   args: {
     name: { type: "positional", required: true, description: "Model name" },
     version: { type: "positional", required: false, description: "Version (required when the name has multiple entries)" },
+    runtime: { type: "string", description: "Narrow to a runtime (claude|tack) when the name@version has variants" },
+    backend: { type: "string", description: "Narrow to a backend (bedrock|anthropic) when the name@version has variants" },
   },
   run: action(async ({ args }: { args: Record<string, unknown> }) => {
+    const runtime = args.runtime ? String(args.runtime).toLowerCase() : undefined;
+    if (runtime && runtime !== "claude" && runtime !== "tack") {
+      throw new Error(`--runtime must be "claude" or "tack" (got "${runtime}").`);
+    }
+    const backend = args.backend ? String(args.backend).toLowerCase() : undefined;
+    if (backend && backend !== "bedrock" && backend !== "anthropic") {
+      throw new Error(`--backend must be "bedrock" or "anthropic" (got "${backend}").`);
+    }
     const removed = await removeModelFromConfig(
       String(args.name),
       args.version ? String(args.version) : undefined,
+      {
+        runtime: runtime as "claude" | "tack" | undefined,
+        backend: backend as "bedrock" | "anthropic" | undefined,
+      },
     );
     console.log(pc.green(`Removed model ${pc.bold(`${removed.name}@${removed.version}`)}`));
     console.log(pc.dim(`  ${CONFIG_PATH}`));
@@ -889,7 +935,11 @@ const modelVerify = defineCommand({
     version: { type: "positional", required: false, description: "Version (required when the name has multiple entries)" },
     backend: {
       type: "string",
-      description: "Pick a backend (bedrock|anthropic) when the model is registered under both",
+      description: "Pick a backend (bedrock|anthropic) when the model is registered under several variants",
+    },
+    runtime: {
+      type: "string",
+      description: "Pick a runtime (claude|tack) when the model is registered under several variants",
     },
     timeout: { type: "string", description: "Per-model timeout in milliseconds (default: 30000)" },
     json: { type: "boolean", default: false, description: "Emit raw JSON instead of the human view" },
@@ -903,7 +953,11 @@ const modelVerify = defineCommand({
     if (backend && backend !== "bedrock" && backend !== "anthropic") {
       throw new Error(`--backend must be "bedrock" or "anthropic" (got "${backend}").`);
     }
-    const resolved = resolveModel(config, ref, backend);
+    const runtime = args.runtime as "claude" | "tack" | undefined;
+    if (runtime && runtime !== "claude" && runtime !== "tack") {
+      throw new Error(`--runtime must be "claude" or "tack" (got "${runtime}").`);
+    }
+    const resolved = resolveModel(config, ref, { backend, runtime });
     const label = `${resolved.name}@${resolved.version}`;
 
     // A bedrock model authenticates through its configured aws profile — drive
@@ -940,6 +994,67 @@ const modelVerify = defineCommand({
   }),
 });
 
+const modelPriceRefresh = defineCommand({
+  meta: {
+    name: "refresh",
+    description: "Re-fetch on-demand pricing for every bedrock model from the AWS Price List and update the config + cache",
+  },
+  run: action(async () => {
+    const config = await loadConfig();
+    const bedrock = config.models.filter((m) => m.backend === "bedrock");
+    if (bedrock.length === 0) {
+      return void console.log(pc.dim("No bedrock models configured — nothing to price."));
+    }
+
+    // The summary model does the matching; confirm it's configured/authed first.
+    const summary = resolveSummaryModel(config);
+    if (summary.aws) await ensureAuth(summary.aws, { autoLogin: true });
+
+    // One price target per (region, name@version) — variants share a foundation
+    // model, hence the same rates. `pricingCacheKey` is that dedup key.
+    const targetByKey = new Map<string, PricingTarget>();
+    for (const m of bedrock) {
+      const region = resolveAwsProfile(config.aws, m.awsProfile)?.region ?? defaultRegion();
+      const key = pricingCacheKey({ region, provider: m.provider, name: m.name, version: m.version });
+      if (!targetByKey.has(key)) {
+        targetByKey.set(key, { key, name: m.name, version: m.version, provider: m.provider, region });
+      }
+    }
+
+    const priced = await resolvePricing(config, [...targetByKey.values()], {
+      force: true,
+      log: (line) => console.error(pc.dim(`# ${line}`)),
+    });
+
+    let updated = 0;
+    let unmatched = 0;
+    for (const m of bedrock) {
+      const region = resolveAwsProfile(config.aws, m.awsProfile)?.region ?? defaultRegion();
+      const key = pricingCacheKey({ region, provider: m.provider, name: m.name, version: m.version });
+      const p = priced.get(key);
+      const label = `${m.name}@${m.version}`;
+      if (!p) {
+        unmatched++;
+        console.log(`${pc.yellow("· no match")}  ${pc.bold(label)}  ${pc.dim(`runtime=${m.runtime} backend=${m.backend}`)}`);
+        continue;
+      }
+      await updateModelPricing(m.name, m.version, { runtime: m.runtime, backend: m.backend }, p);
+      updated++;
+      console.log(`${pc.green("· priced")}  ${pc.bold(label)}  ${pc.dim(formatPricing(p))}`);
+    }
+    await loadConfig(); // surface a parse error immediately
+
+    console.log(
+      pc.dim(`\n${updated} updated, ${unmatched} unmatched.  ${CONFIG_PATH}`),
+    );
+  }),
+});
+
+const modelPrice = defineCommand({
+  meta: { name: "price", description: "On-demand pricing (AWS Price List → summary-model matching)" },
+  subCommands: { refresh: modelPriceRefresh },
+});
+
 const model = defineCommand({
   meta: { name: "model", description: "Model registry" },
   subCommands: {
@@ -948,6 +1063,7 @@ const model = defineCommand({
     verify: modelVerify,
     add: modelAdd,
     remove: modelRemove,
+    price: modelPrice,
     "set-default": modelSetDefault,
     set: modelSet,
   },

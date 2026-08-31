@@ -1,6 +1,6 @@
 import { loadConfig } from "../config/load";
 import { ensureAuth } from "../models/aws";
-import { resolveModel, type ResolvedModel } from "../models/registry";
+import { canonicalModelRef, resolveModel, type ResolvedModel } from "../models/registry";
 import { effectiveModelRef } from "../models/routing";
 import {
   db,
@@ -70,7 +70,9 @@ export async function supervise(runId: string): Promise<void> {
 
       const implRef = effectiveModelRef(config, "implementer") ?? plannerRef;
       const implModel = resolveModel(config, implRef);
-      const implLabel = `${implModel.name}@${implModel.version}`;
+      // A ref that re-resolves to this exact variant (qualified only when the
+      // name@version has several), so task execution can't land on a sibling.
+      const implLabel = canonicalModelRef(config, implModel);
 
       // Same preflight for the implementer's profile — it may be a different
       // account than the planner's. Fail before creating tasks we can't run.

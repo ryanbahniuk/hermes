@@ -1,5 +1,5 @@
 import type { TackConfig } from "../config/schema";
-import { resolveModel } from "../models/registry";
+import { canonicalModelRef, resolveModel } from "../models/registry";
 import { effectiveModelRef } from "../models/routing";
 import {
   createRun,
@@ -74,7 +74,9 @@ export function createPlannerActions(
 
       // Resolve the implementer once so pre-created tasks carry model + runtime.
       const implModel = resolveModel(config, implRef);
-      const implLabel = `${implModel.name}@${implModel.version}`;
+      // Persist a ref that re-resolves to this exact variant (qualified only when
+      // the name@version has several), so execution can't land on a sibling.
+      const implLabel = canonicalModelRef(config, implModel);
 
       const run = createRun({ problem, plannerModel: implRef, sessionId });
 

@@ -234,7 +234,10 @@ function writeModels(path: string, models: ModelInput[]): void {
 /**
  * Adds a model to the config. Validates the entry with `normalizeModel` (so the
  * runtime/backend/target rules are enforced up front, independent of the config
- * reload) and rejects a duplicate `name@version`.
+ * reload) and rejects a duplicate — a model's identity is the full
+ * `(name, version, runtime, backend)` tuple, so the same `name@version` may be
+ * registered under several runtime/backend variants (e.g. an `anthropic` backend
+ * alongside a `bedrock`/`tack` one).
  */
 export async function addModelToConfig(
   input: ModelInput,
@@ -244,45 +247,120 @@ export async function addModelToConfig(
     throw new Error(`No config found at ${path}. Run \`tack init\` to create one.`);
   }
   const model = ModelInputSchema.parse(input);
-  // Surfaces "backend bedrock requires inferenceProfile", etc., before we write.
-  normalizeModel(model);
+  // Surfaces "backend bedrock requires inferenceProfile", etc., before we write,
+  // and fills the runtime/backend defaults we compare identity on.
+  const normalized = normalizeModel(model);
   const existing = await readModels(path);
-  if (existing.some((m) => modelRef(m) === modelRef(model))) {
-    throw new Error(`A model "${modelRef(model)}" already exists in the config.`);
+  const clash = existing.some((m) => {
+    const n = normalizeModel(m);
+    return (
+      n.name === normalized.name &&
+      n.version === normalized.version &&
+      n.runtime === normalized.runtime &&
+      n.backend === normalized.backend
+    );
+  });
+  if (clash) {
+    throw new Error(
+      `A model "${modelRef(normalized)}" with runtime "${normalized.runtime}" and ` +
+        `backend "${normalized.backend}" already exists in the config.`,
+    );
   }
   writeModels(path, [...existing, model]);
   return model;
 }
 
 /**
- * Removes a model by `name` (and optional `version`). With no version, removes
- * the sole entry for that name, or throws listing the versions when ambiguous.
+ * Removes a model by `name`, narrowed by optional `version` and a
+ * `runtime`/`backend` variant selector. Removes the sole match, or throws
+ * listing the variants when the selection is still ambiguous.
  */
 export async function removeModelFromConfig(
   name: string,
   version: string | undefined,
+  selector: { runtime?: "claude" | "tack"; backend?: "bedrock" | "anthropic" } = {},
   path = CONFIG_PATH,
 ): Promise<ModelInput> {
   if (!existsSync(path)) {
     throw new Error(`No config found at ${path}. Run \`tack init\` to create one.`);
   }
   const existing = await readModels(path);
-  const matches = existing.filter(
+  let matches = existing.filter(
     (m) => m.name === name && (version ? m.version === version : true),
   );
+  if (selector.backend) {
+    matches = matches.filter((m) => normalizeModel(m).backend === selector.backend);
+  }
+  if (selector.runtime) {
+    matches = matches.filter((m) => normalizeModel(m).runtime === selector.runtime);
+  }
   if (matches.length === 0) {
     const ref = version ? `${name}@${version}` : name;
-    throw new Error(`No model "${ref}" in the config.`);
+    const pins = [selector.backend, selector.runtime].filter(Boolean).join("/");
+    throw new Error(`No model "${ref}"${pins ? ` (${pins})` : ""} in the config.`);
   }
   if (matches.length > 1) {
-    const versions = matches.map((m) => m.version).join(", ");
+    const opts = matches
+      .map((m) => {
+        const n = normalizeModel(m);
+        return `${n.name}@${n.version} (runtime=${n.runtime}, backend=${n.backend})`;
+      })
+      .join("; ");
     throw new Error(
-      `Multiple "${name}" entries (versions: ${versions}). Specify a version to remove one.`,
+      `Multiple "${name}" entries match. Narrow with a version and/or --runtime/--backend: ${opts}`,
     );
   }
   const removed = matches[0]!;
   writeModels(path, existing.filter((m) => m !== removed));
   return removed;
+}
+
+/**
+ * Sets (or clears, with `undefined`) the `pricing` on a single model entry,
+ * narrowed by optional `version` and a `runtime`/`backend` selector. Throws when
+ * the selection matches zero or more than one entry, mirroring `remove`.
+ */
+export async function updateModelPricing(
+  name: string,
+  version: string | undefined,
+  selector: { runtime?: "claude" | "tack"; backend?: "bedrock" | "anthropic" },
+  pricing: ModelInput["pricing"] | undefined,
+  path = CONFIG_PATH,
+): Promise<ModelInput> {
+  if (!existsSync(path)) {
+    throw new Error(`No config found at ${path}. Run \`tack init\` to create one.`);
+  }
+  const existing = await readModels(path);
+  let matches = existing.filter(
+    (m) => m.name === name && (version ? m.version === version : true),
+  );
+  if (selector.backend) {
+    matches = matches.filter((m) => normalizeModel(m).backend === selector.backend);
+  }
+  if (selector.runtime) {
+    matches = matches.filter((m) => normalizeModel(m).runtime === selector.runtime);
+  }
+  if (matches.length === 0) {
+    const ref = version ? `${name}@${version}` : name;
+    throw new Error(`No model "${ref}" in the config.`);
+  }
+  if (matches.length > 1) {
+    const opts = matches
+      .map((m) => {
+        const n = normalizeModel(m);
+        return `${n.name}@${n.version} (runtime=${n.runtime}, backend=${n.backend})`;
+      })
+      .join("; ");
+    throw new Error(
+      `Multiple "${name}" entries match. Narrow with a version and/or runtime/backend: ${opts}`,
+    );
+  }
+  const target = matches[0]!;
+  const updated: ModelInput = { ...target };
+  if (pricing && Object.keys(pricing).length > 0) updated.pricing = pricing;
+  else delete updated.pricing;
+  writeModels(path, existing.map((m) => (m === target ? updated : m)));
+  return updated;
 }
 
 // --- Model role sections (defaults / overrides) -----------------------------
