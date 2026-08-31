@@ -64,6 +64,43 @@ export function sessionLive(s: SessionRow): Live {
     : { label: "dead", color: "yellow", dim: false };
 }
 
+/** A destructive action offered on a dashboard row: its key and hint verb. */
+export interface RowAction {
+  /** The keybinding that fires it. */
+  key: "x" | "d";
+  /** The verb shown next to the key, e.g. "stop", "kill", "delete". */
+  hint: string;
+}
+
+/**
+ * The destructive actions valid for a run *in its current live state* — the
+ * single source of truth behind the per-row hint, the footer, and the key
+ * handler. A run can only be stopped while it's still in flight (running or
+ * stalled); a terminal run (done/failed) offers nothing.
+ */
+export function runActions(r: RunRow): RowAction[] {
+  const { label } = runLive(r);
+  const terminal = label === "done" || label === "failed";
+  return terminal ? [] : [{ key: "x", hint: "stop" }];
+}
+
+/**
+ * The destructive actions valid for a session *in its current live state*. Kill
+ * only makes sense on an active session (a dead/closed one has nothing live to
+ * signal); delete is always available regardless of liveness.
+ */
+export function sessionActions(s: SessionRow): RowAction[] {
+  const actions: RowAction[] = [];
+  if (sessionLive(s).label === "active") actions.push({ key: "x", hint: "kill" });
+  actions.push({ key: "d", hint: "delete" });
+  return actions;
+}
+
+/** Renders a row's actions as a hint string, e.g. `x kill · d delete`. */
+export function actionHint(actions: RowAction[]): string {
+  return actions.map((a) => `${a.key} ${a.hint}`).join(" · ");
+}
+
 /** A short USD string, e.g. `$0.0421`. */
 export function usd(n: number): string {
   return `$${n.toFixed(4)}`;

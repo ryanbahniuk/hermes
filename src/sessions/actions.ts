@@ -4,6 +4,7 @@ import {
   deleteSession as deleteSessionRow,
   listRunsBySession,
   listTasks,
+  setRunStatus,
   setSessionStatus,
   setSupervisorPid,
   type RunRow,
@@ -87,21 +88,35 @@ export function deleteSession(
   return { stopped, runs: runs.length };
 }
 
-/** Outcome of {@link stopRun}: whether a live supervisor was actually signalled. */
-export type StopRunResult = "stopped" | "not-running";
+/**
+ * Outcome of {@link stopRun}:
+ * - `"stopped"`  — a live supervisor was SIGTERM'd (it will mark the run terminal);
+ * - `"cleared"`  — a stalled run (non-terminal but its supervisor is dead) was
+ *                  forced to a terminal `failed` state so it stops reading as live;
+ * - `"not-running"` — a no-op: the run is already terminal (done/failed).
+ */
+export type StopRunResult = "stopped" | "cleared" | "not-running";
 
 /**
- * Stop a single run's supervisor: SIGTERM it and clear its recorded pid. Returns
- * `"not-running"` (a no-op) when the supervisor is already dead or terminal.
+ * Stop a single non-terminal run. If its supervisor is alive, SIGTERM it and
+ * clear the recorded pid (the supervisor then marks the run terminal itself).
+ * If the run is stalled — non-terminal yet its supervisor is already dead — it
+ * will never reach a terminal state on its own, so mark it `failed` and clear
+ * the stale pid. A run that is already terminal is left untouched.
  */
 export function stopRun(run: RunRow): StopRunResult {
-  if (!isAlive(run.supervisor_pid)) return "not-running";
-  try {
-    process.kill(run.supervisor_pid!, "SIGTERM");
-    setSupervisorPid(run.id, null);
-  } catch {
-    // Already gone between the liveness check and the signal.
-    return "not-running";
+  if (run.status === "done" || run.status === "failed") return "not-running";
+  if (isAlive(run.supervisor_pid)) {
+    try {
+      process.kill(run.supervisor_pid!, "SIGTERM");
+      setSupervisorPid(run.id, null);
+      return "stopped";
+    } catch {
+      // Raced: the supervisor exited between the liveness check and the signal.
+      // Fall through and settle it as a stalled run.
+    }
   }
-  return "stopped";
+  setRunStatus(run.id, "failed");
+  setSupervisorPid(run.id, null);
+  return "cleared";
 }
