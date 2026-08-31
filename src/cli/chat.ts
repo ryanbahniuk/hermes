@@ -6,28 +6,42 @@ import { db, listRunsBySession, sessionTotalCost } from "../db";
 import { isAlive } from "../process/spawn";
 import { PlannerSession } from "../planner/session";
 import type { PlannerEvent } from "../planner/runtime";
+import { startHorseAnimation, type HorseAnimation } from "./horse";
 
 function shortJSON(input: unknown): string {
   const s = typeof input === "string" ? input : JSON.stringify(input ?? {});
   return s.length > 160 ? `${s.slice(0, 160)}…` : s;
 }
 
-/** Renders one streamed planner event to the terminal. */
-function printEvent(ev: PlannerEvent): void {
+/**
+ * Formats one streamed planner event as a single transcript line (no newline),
+ * or `null` for event types the REPL does not surface (usage/cost/etc.).
+ */
+function formatEvent(ev: PlannerEvent): string | null {
   switch (ev.type) {
     case "text":
-      stdout.write(ev.text.trim() + "\n");
-      break;
+      return ev.text.trim();
     case "tool_call":
-      stdout.write(pc.dim(`  → ${ev.tool}(${shortJSON(ev.input)})`) + "\n");
-      break;
+      return pc.dim(`  → ${ev.tool}(${shortJSON(ev.input)})`);
     case "tool_result":
-      stdout.write(pc.dim(`  ← ${ev.ok ? "" : "ERR "}${ev.preview.replace(/\s+/g, " ")}`) + "\n");
-      break;
+      return pc.dim(`  ← ${ev.ok ? "" : "ERR "}${ev.preview.replace(/\s+/g, " ")}`);
     case "error":
-      stdout.write(pc.red(`  error: ${ev.message}`) + "\n");
-      break;
+      return pc.red(`  error: ${ev.message}`);
+    default:
+      return null;
   }
+}
+
+/**
+ * Builds the streaming callback: each surfaced event is printed through the
+ * animation controller so the galloping horse clears its line, the event
+ * scrolls up cleanly, and the horse repaints on the fresh bottom line.
+ */
+function makePrintEvent(anim: HorseAnimation): (ev: PlannerEvent) => void {
+  return (ev) => {
+    const line = formatEvent(ev);
+    if (line !== null) anim.print(line);
+  };
 }
 
 function printRuns(sessionId: string): void {
@@ -112,10 +126,13 @@ export async function runChat(
     }
 
     stdout.write(pc.dim("planner ›\n"));
+    const anim = startHorseAnimation();
     try {
-      await session.sendTurn(line, printEvent);
+      await session.sendTurn(line, makePrintEvent(anim));
     } catch (err) {
-      stdout.write(pc.red(`  error: ${(err as Error).message}`) + "\n");
+      anim.print(pc.red(`  error: ${(err as Error).message}`));
+    } finally {
+      anim.stop();
     }
     const cost = sessionTotalCost(session.id);
     stdout.write(
