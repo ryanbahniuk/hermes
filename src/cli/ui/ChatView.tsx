@@ -31,14 +31,29 @@ type Line =
 function LineView({ line }: { line: Line }): React.ReactElement | null {
   switch (line.kind) {
     case "user":
+      // A blank row above each user turn groups every question with the reply
+      // beneath it and separates one exchange from the previous.
+      return (
+        <Box marginTop={1}>
+          <Text>
+            <Text color="cyan" bold>
+              you ›{" "}
+            </Text>
+            {line.text}
+          </Text>
+        </Box>
+      );
+    case "assistant":
+      // A colored, labeled prefix sets the planner's replies apart from the
+      // user's lines so the two speakers never read as one block.
       return (
         <Text>
-          <Text color="cyan">you › </Text>
+          <Text color="green" bold>
+            planner ›{" "}
+          </Text>
           {line.text}
         </Text>
       );
-    case "assistant":
-      return <Text>{line.text}</Text>;
     case "error":
       return <Text color="red">{"  error: " + line.message}</Text>;
     case "notice":
@@ -90,6 +105,27 @@ function LineView({ line }: { line: Line }): React.ReactElement | null {
         </Box>
       );
   }
+}
+
+// Braille spinner frames for the planner's "thinking" pulse — a lightweight,
+// always-animating cue that a turn is in flight (distinct from the horse, which
+// tracks background worker runs, not the planner itself).
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/** A spinning "planner is thinking…" line, shown only while a turn is running. */
+function Thinking(): React.ReactElement {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setFrame((f) => f + 1), 120);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <Text color="green">
+      {"  "}
+      {SPINNER[frame % SPINNER.length]} planner is thinking
+      {".".repeat(frame % 4)}
+    </Text>
+  );
 }
 
 const HELP: string[] = [
@@ -330,7 +366,13 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
           overflow, so the newest lines stay in view and the oldest scroll off
           the top — the horse below is never pushed off-screen. When scrolled
           back, the window ends at the anchor line instead of the latest. */}
-      <Box flexGrow={1} flexDirection="column" overflow="hidden" justifyContent="flex-end">
+      <Box
+        flexGrow={1}
+        flexDirection="column"
+        overflow="hidden"
+        justifyContent="flex-end"
+        marginBottom={1}
+      >
         {visible.map((line) => (
           <LineView key={line.id} line={line} />
         ))}
@@ -350,6 +392,7 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
               {"  queued: " + text}
             </Text>
           ))}
+        {busy && live.length === 0 && <Thinking />}
         <Prompt onSubmit={handleSubmit} isActive placeholder="ask the planner…" />
         <Text dimColor>{footer}</Text>
         <Horse running={workersRunning} />
