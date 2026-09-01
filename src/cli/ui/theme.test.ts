@@ -39,10 +39,10 @@ function runRow(over: Partial<RunRow>): RunRow {
 }
 
 describe("sessionLive", () => {
-  test("closed sessions read closed, regardless of pid/heartbeat", () => {
-    const live = sessionLive(row({ status: "closed", pid: process.pid, heartbeat_at: new Date().toISOString() }));
-    expect(live.label).toBe("closed");
-    expect(live.color).toBe("gray");
+  test("a non-live, non-archived session reads dead", () => {
+    const live = sessionLive(row({ status: "active", pid: DEAD_PID, heartbeat_at: null }));
+    expect(live.label).toBe("dead");
+    expect(live.color).toBe("yellow");
   });
 
   test("archived sessions read archived (gray, dim), regardless of pid/heartbeat", () => {
@@ -158,10 +158,10 @@ describe("sessionActions", () => {
     ]);
   });
 
-  test("a closed session with all runs terminal offers archive and delete", () => {
+  test("a live session with all runs terminal offers kill, archive and delete", () => {
     expect(
-      keys(row({ status: "closed", pid: process.pid, heartbeat_at: new Date().toISOString() }), true),
-    ).toEqual(["a", "d"]);
+      keys(row({ status: "active", pid: process.pid, heartbeat_at: new Date().toISOString() }), true),
+    ).toEqual(["x", "a", "d"]);
   });
 
   test("an archived session offers only unarchive and delete", () => {

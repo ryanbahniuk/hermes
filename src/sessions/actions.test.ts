@@ -133,14 +133,14 @@ describe("archiveSession / unarchiveSession", () => {
     expect(() => archiveSession(s.id)).toThrow(/already archived/);
   });
 
-  test("unarchive flips an archived session back to closed", () => {
+  test("unarchive flips an archived session back to active", () => {
     const s = createSession({});
     archiveSession(s.id);
 
     const res = unarchiveSession(s.id);
 
     expect(res.priorStatus).toBe("archived");
-    expect(getSession(s.id)!.status).toBe("closed");
+    expect(getSession(s.id)!.status).toBe("active");
   });
 
   test("unarchive throws when the session isn't archived", () => {

@@ -5,6 +5,7 @@ import { costFromPricing, type TokenTotals } from "../orchestrator/execute";
 import {
   addSessionCost,
   addSessionMessage,
+  clearSessionLiveness,
   createSession,
   getSession,
   listSessionMessages,
@@ -88,8 +89,8 @@ export class PlannerSession {
   /**
    * Attaches this process to the session: stamps our pid, reactivates the row, and
    * starts the heartbeat. Reactivation is deliberate and status-agnostic — reopening
-   * a cleanly-closed *or an archived* session by id makes it live again. Opening an
-   * archived session is thus an implicit unarchive: we never leave an archived row
+   * a dead *or an archived* session by id makes it live again. Opening an archived
+   * session is thus an implicit unarchive: we never leave an archived row
    * masquerading as "active", it genuinely becomes active again. (Use
    * `unarchiveSession` to restore-without-opening.) The timer is unref'd so it never
    * keeps the process alive on its own.
@@ -102,13 +103,18 @@ export class PlannerSession {
     this.heartbeat.unref?.();
   }
 
-  /** Clean exit: stops the heartbeat and marks the session closed (active→closed). */
+  /**
+   * Clean exit: stops the heartbeat and clears the session's liveness markers
+   * (pid + heartbeat) so it reads "dead" immediately via `sessionLive`, rather
+   * than waiting out the heartbeat-stale window. The status stays "active";
+   * liveness alone tells a live session from a dead one. Reopening reactivates it.
+   */
   close(): void {
     if (this.heartbeat) {
       clearInterval(this.heartbeat);
       this.heartbeat = null;
     }
-    setSessionStatus(this.id, "closed");
+    clearSessionLiveness(this.id);
   }
 
   /** The stored transcript, for replaying to the terminal on resume. */

@@ -77,7 +77,7 @@ const migrations: Migration[] = [
         planner_model  TEXT,
         runtime        TEXT,
         resume_ref     TEXT,          -- claude SDK session id (null for tack)
-        status         TEXT NOT NULL, -- active | closed | archived (soft-hidden; no CHECK, so new values need no migration)
+        status         TEXT NOT NULL, -- active | archived (soft-hidden; no CHECK, so new values need no migration)
         cost           REAL NOT NULL DEFAULT 0,
         created_at     TEXT NOT NULL,
         updated_at     TEXT NOT NULL
@@ -130,6 +130,15 @@ const migrations: Migration[] = [
       ALTER TABLE sessions ADD COLUMN pid INTEGER;
       ALTER TABLE sessions ADD COLUMN heartbeat_at TEXT;
     `,
+  },
+  {
+    version: 6,
+    name: "drop_closed_session_status",
+    // `closed` is gone as a stored status: liveness (pid + fresh heartbeat) now
+    // distinguishes a live session from a dead one, so a formerly-closed session
+    // is just an `active` row with no live process — it reads "dead" via liveness.
+    // Rewrite legacy rows so no orphaned value lingers.
+    sql: `UPDATE sessions SET status = 'active' WHERE status = 'closed';`,
   },
 ];
 

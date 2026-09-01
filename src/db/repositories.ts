@@ -22,11 +22,13 @@ export type TaskStatus =
   | "done"
   | "failed";
 
-// `archived` is a soft, reversible hidden state that supersedes/implies `closed`
-// for display: all the session's DB records are kept (unlike a delete), it's just
-// hidden from the default listings. The column is plain TEXT (no CHECK), so adding
-// the value needs no SQL migration. See archiveSession/unarchiveSession.
-export type SessionStatus = "active" | "closed" | "archived";
+// `archived` is a soft, reversible hidden state: all the session's DB records are
+// kept (unlike a delete), it's just hidden from the default listings. Everything
+// else is `active`; whether an active session is *live* is decided by liveness
+// (pid alive + fresh heartbeat), not a stored status — see `sessionLive`. The
+// column is plain TEXT (no CHECK), so adding a value needs no SQL migration. See
+// archiveSession/unarchiveSession.
+export type SessionStatus = "active" | "archived";
 
 export interface RunRow {
   id: string;
@@ -336,6 +338,18 @@ export function touchSessionHeartbeat(sessionId: string): void {
   getDb()
     .prepare(`UPDATE sessions SET heartbeat_at = ?, updated_at = ? WHERE id = ?`)
     .run(nowIso(), nowIso(), sessionId);
+}
+
+/**
+ * Clears the session's liveness markers (pid + heartbeat) so `sessionLive` reads
+ * "dead" immediately, without waiting out the heartbeat-stale window. Used on a
+ * clean exit or a kill: there's no live process anymore, so nothing should read
+ * the row as active.
+ */
+export function clearSessionLiveness(sessionId: string): void {
+  getDb()
+    .prepare(`UPDATE sessions SET pid = NULL, heartbeat_at = NULL, updated_at = ? WHERE id = ?`)
+    .run(nowIso(), sessionId);
 }
 
 /**

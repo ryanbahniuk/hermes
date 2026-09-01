@@ -1,6 +1,7 @@
 import { rmSync } from "node:fs";
 import type { TackConfig } from "../config/schema";
 import {
+  clearSessionLiveness,
   deleteSession as deleteSessionRow,
   getSession,
   listRunsBySession,
@@ -76,10 +77,13 @@ export function archiveSession(sessionId: string): { id: string; priorStatus: Se
 }
 
 /**
- * Restore an archived session, flipping it back to "closed" (recoverable, since
- * archiving kept every record). Throws if the session isn't currently archived —
- * there's nothing to restore. Reopening an archived session by id also reactivates
- * it (see PlannerSession.goLive), so this is for restoring without opening.
+ * Restore an archived session, flipping it back to "active" (recoverable, since
+ * archiving kept every record). This restores the stored status only; whether it
+ * reads live or "dead" is decided by liveness (pid + heartbeat), and with no live
+ * process attached a just-unarchived session reads "dead" until reopened. Throws
+ * if the session isn't currently archived — there's nothing to restore. Reopening
+ * an archived session by id also reactivates it (see PlannerSession.goLive), so
+ * this is for restoring without opening.
  */
 export function unarchiveSession(sessionId: string): { id: string; priorStatus: SessionStatus } {
   const s = getSession(sessionId);
@@ -87,7 +91,7 @@ export function unarchiveSession(sessionId: string): { id: string; priorStatus: 
   if (s.status !== "archived") {
     throw new Error(`Session ${sessionId} is not archived (status: ${s.status}).`);
   }
-  setSessionStatus(sessionId, "closed");
+  setSessionStatus(sessionId, "active");
   return { id: sessionId, priorStatus: s.status };
 }
 
@@ -107,13 +111,16 @@ export function stopSessionRuns(sessionId: string): number {
 }
 
 /**
- * Kill a session: stop its live run supervisors and mark it closed. Keeps all of
- * its data (runs, tasks, logs, worktrees) — reopening reactivates it. Returns how
- * many run supervisors were signalled.
+ * Kill a session: stop its live run supervisors, then clear the session's own
+ * liveness markers (pid + heartbeat) so `sessionLive` reads "dead" immediately —
+ * even if the interactive process is still alive, which is the point of a kill.
+ * The status stays "active"; liveness alone distinguishes live from dead. Keeps
+ * all of its data (runs, tasks, logs, worktrees) — reopening reactivates it.
+ * Returns how many run supervisors were signalled.
  */
 export function killSession(sessionId: string): { stopped: number } {
   const stopped = stopSessionRuns(sessionId);
-  setSessionStatus(sessionId, "closed");
+  clearSessionLiveness(sessionId);
   return { stopped };
 }
 
