@@ -7,10 +7,6 @@ import {
   listSessions,
   listTasks,
   sessionTotalCost,
-  type RunRow,
-  type SessionCost,
-  type SessionPrRow,
-  type SessionRow,
 } from "../../db";
 import {
   allRunsTerminal,
@@ -30,20 +26,7 @@ import {
   usd,
   type RowAction,
 } from "./theme";
-
-// A dashboard row is either a session header or one of its runs, flattened into
-// a single navigable list so a single cursor can walk the whole tree.
-type Row =
-  | {
-      key: string;
-      kind: "session";
-      session: SessionRow;
-      cost: SessionCost;
-      /** Every run terminal → archive is eligible. Computed here so it's the one source. */
-      allRunsTerminal: boolean;
-    }
-  | { key: string; kind: "run"; run: RunRow; taskCount: number }
-  | { key: string; kind: "pr"; pr: SessionPrRow };
+import { patchRow, withoutSessionBlock, type Row } from "./rows";
 
 function buildRows(showArchived: boolean): Row[] {
   const rows: Row[] = [];
@@ -75,6 +58,23 @@ function actionsFor(row: Row): RowAction[] {
   if (row.kind === "session") return sessionActions(row.session, row.allRunsTerminal);
   if (row.kind === "run") return runActions(row.run);
   return []; // PR rows are informational — no destructive actions.
+}
+
+/**
+ * Defer a blocking backend action off the render path: `setTimeout(0)` lets Ink
+ * flush the optimistic row change to the terminal before the (possibly heavy)
+ * teardown runs and blocks the main thread. Failures are swallowed on purpose —
+ * the 500ms poll rebuilds rows from real state, so a partial/failed teardown just
+ * reappears or reconciles on the next tick rather than crashing the input handler.
+ */
+function runInBackground(action: () => void): void {
+  setTimeout(() => {
+    try {
+      action();
+    } catch {
+      // Reconciled by the next poll rebuild.
+    }
+  }, 0);
 }
 
 function RowView({ row, selected }: { row: Row; selected: boolean }): React.ReactElement {
@@ -208,17 +208,31 @@ export function Dashboard({
       // PR rows are informational — Enter does nothing (no read-only view yet).
       return;
     }
-    // Destructive actions fire immediately on the highlighted row; the next poll
-    // (or this eager rebuild) drops the closed/deleted row and re-clamps the cursor.
+    // Destructive actions update the highlighted row optimistically — the visible
+    // rows (and cursor clamp) change on this keypress, before the blocking backend
+    // action runs off the render path — so the repaint never waits on teardown. The
+    // 500ms poll rebuild stays the source of truth and reconciles any partial/failed
+    // teardown on its next tick.
     if (input === "x") {
       const row = rows[active];
       if (!row) return;
       // Inert unless stop/kill is a valid transition for this row's live state —
       // e.g. `x` on a terminal run or a non-active session does nothing.
       if (!actionsFor(row).some((a) => a.key === "x")) return;
-      if (row.kind === "session") killSession(row.session.id);
-      else if (row.kind === "run") stopRun(row.run);
-      return void setRows(buildRows(showArchived));
+      if (row.kind === "session") {
+        // Kill settles to "closed": the row stays but drops its "kill" affordance.
+        setRows((rs) => patchRow(rs, active, { ...row, session: { ...row.session, status: "closed" } }));
+        const id = row.session.id;
+        runInBackground(() => killSession(id));
+      } else if (row.kind === "run") {
+        // Stop settles the run terminal: reads "stopped" and offers nothing further.
+        setRows((rs) =>
+          patchRow(rs, active, { ...row, run: { ...row.run, status: "stopped", supervisor_pid: null } }),
+        );
+        const runRow = row.run;
+        runInBackground(() => stopRun(runRow));
+      }
+      return;
     }
     if (input === "a") {
       const row = rows[active];
@@ -226,23 +240,40 @@ export function Dashboard({
       // already archived) — inert otherwise, so a stray `a` can't force it.
       if (!row || row.kind !== "session") return;
       if (!actionsFor(row).some((x) => x.key === "a")) return;
-      archiveSession(row.session.id);
-      return void setRows(buildRows(showArchived));
+      const id = row.session.id;
+      // While archived sessions are hidden, archiving removes the block; when they
+      // are revealed the row stays and simply re-reads as "archived".
+      if (showArchived) {
+        setRows((rs) => patchRow(rs, active, { ...row, session: { ...row.session, status: "archived" } }));
+      } else {
+        setRows((rs) => withoutSessionBlock(rs, active));
+        setCursor((c) => Math.max(0, Math.min(c, rows.length - 2)));
+      }
+      runInBackground(() => archiveSession(id));
+      return;
     }
     if (input === "u") {
       const row = rows[active];
       // Unarchive only applies to a revealed archived session.
       if (!row || row.kind !== "session") return;
       if (!actionsFor(row).some((x) => x.key === "u")) return;
-      unarchiveSession(row.session.id);
-      return void setRows(buildRows(showArchived));
+      const id = row.session.id;
+      // The revealed row stays put and flips from "archived" back to "closed".
+      setRows((rs) => patchRow(rs, active, { ...row, session: { ...row.session, status: "closed" } }));
+      runInBackground(() => unarchiveSession(id));
+      return;
     }
     if (input === "d") {
       const row = rows[active];
       // Delete is session-only — a run row has no delete action.
       if (!row || row.kind !== "session") return;
-      deleteSession(row.session.id, config);
-      return void setRows(buildRows(showArchived));
+      const id = row.session.id;
+      // Drop the whole session block immediately; the heavy teardown (stop runs →
+      // purge worktrees/branches → remove logs → delete rows) runs in the background.
+      setRows((rs) => withoutSessionBlock(rs, active));
+      setCursor((c) => Math.max(0, Math.min(c, rows.length - 2)));
+      runInBackground(() => deleteSession(id, config));
+      return;
     }
   });
 
