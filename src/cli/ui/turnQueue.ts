@@ -8,6 +8,12 @@ export interface TurnQueue {
   submit(text: string): void;
   /** Messages waiting to start, oldest first. Excludes the in-flight turn. */
   pending(): string[];
+  /**
+   * True while the drain loop is active (a turn is running or queued). Read
+   * synchronously — unlike React state it can't be stale, so callers can decide
+   * on the spot whether a just-submitted message will start immediately.
+   */
+  isRunning(): boolean;
 }
 
 export interface TurnQueueOptions {
@@ -15,9 +21,15 @@ export interface TurnQueueOptions {
   runTurn: (text: string) => Promise<void>;
   /** Notified with the pending list whenever it changes (for rendering). */
   onChange?: (pending: string[]) => void;
+  /**
+   * Notified when the drain loop starts (true) and when it fully empties (false).
+   * Unlike per-turn state, this stays true across back-to-back queued turns, so a
+   * "processing" indicator driven off it never flickers off between them.
+   */
+  onRunning?: (running: boolean) => void;
 }
 
-export function createTurnQueue({ runTurn, onChange }: TurnQueueOptions): TurnQueue {
+export function createTurnQueue({ runTurn, onChange, onRunning }: TurnQueueOptions): TurnQueue {
   let queue: string[] = [];
   let running = false;
 
@@ -29,6 +41,7 @@ export function createTurnQueue({ runTurn, onChange }: TurnQueueOptions): TurnQu
   async function drain(): Promise<void> {
     if (running) return;
     running = true;
+    onRunning?.(true);
     try {
       while (queue.length > 0) {
         const text = queue[0]!;
@@ -38,6 +51,7 @@ export function createTurnQueue({ runTurn, onChange }: TurnQueueOptions): TurnQu
       }
     } finally {
       running = false;
+      onRunning?.(false);
     }
   }
 
@@ -49,6 +63,9 @@ export function createTurnQueue({ runTurn, onChange }: TurnQueueOptions): TurnQu
     },
     pending() {
       return [...queue];
+    },
+    isRunning() {
+      return running;
     },
   };
 }

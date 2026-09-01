@@ -190,8 +190,15 @@ function eventToLine(ev: PlannerEvent, id: string): Line | null {
 
 export interface ChatViewProps {
   session: PlannerSession;
-  /** Called on /exit, /quit, or Esc. Owner decides: quit app or pop a view. */
+  /** Called on /exit, /quit, or Esc when idle. Owner decides: quit app or pop a view. */
   onExit: () => void;
+  /**
+   * Called when Esc is pressed while a turn is still processing. The owner should
+   * detach — pop back to its host view — WITHOUT closing the session, so the
+   * in-flight turn keeps running in the background. When omitted, Esc mid-turn is
+   * ignored (standalone chat has nowhere to detach to).
+   */
+  onDetach?: () => void;
   /** Resume transcript to seed the scrollback (from `session.history()`). */
   history?: { role: "user" | "assistant"; content: string }[];
   /** True when hosted inside `stable` (changes the footer hint). */
@@ -208,7 +215,7 @@ export interface ChatViewProps {
  * PgDn or ↑/↓ scroll back through history (anchored by line id so streaming
  * output doesn't yank the view).
  */
-export function ChatView({ session, onExit, history = [], embedded = false }: ChatViewProps): React.ReactElement {
+export function ChatView({ session, onExit, onDetach, history = [], embedded = false }: ChatViewProps): React.ReactElement {
   const idRef = useRef(0);
   const nextId = () => `l${idRef.current++}`;
 
@@ -240,8 +247,10 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
 
   const [committed, setCommitted] = useState<Line[]>(initial);
   const [live, setLive] = useState<Line[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [queued, setQueued] = useState<string[]>([]);
+  // True from the moment a turn is submitted until the queue fully drains — spans
+  // back-to-back queued turns without flickering, so the "thinking" pulse and the
+  // Esc-to-detach affordance both track the whole processing window, not one turn.
+  const [processing, setProcessing] = useState(false);
   const [cost, setCost] = useState<SessionCost>(() => sessionTotalCost(session.id));
   const [workersRunning, setWorkersRunning] = useState(false);
   const { columns, rows } = useTerminalSize();
@@ -273,7 +282,17 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
   // never leak into the input buffer. Only non-printable keys are used (Prompt
   // types every printable character), so PgUp/PgDn and ↑/↓ are safe.
   useInput((_input, key) => {
-    if (key.escape && !busy) return void onExit();
+    if (key.escape) {
+      // Mid-turn Esc detaches: hand control back to the host (the stable
+      // dashboard) and let the turn keep running in the background. With no
+      // detach handler (standalone chat) Esc mid-turn is ignored so work isn't
+      // lost. When idle, Esc leaves the session the normal way.
+      if (processing) {
+        if (onDetach) onDetach();
+        return;
+      }
+      return void onExit();
+    }
 
     const { ids, page } = scrollRef.current;
     const len = ids.length;
@@ -297,15 +316,21 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
 
   const append = (...lines: Line[]) => setCommitted((prev) => [...prev, ...lines]);
 
+  // FIFO flags paired with each submission: `true` means the user line was
+  // already shown optimistically (submitted while idle), so this turn must NOT
+  // re-append it; `false` means it was queued mid-turn and its user line still
+  // needs to land now, as the turn actually starts — which keeps it correctly
+  // ordered below the previous reply instead of jumping above the live stream.
+  const optimisticFlags = useRef<boolean[]>([]);
+
   // Run exactly one planner turn to completion. Kept in a ref so the queue's
   // drain loop always calls the latest closure (fresh `session`/setters) rather
   // than a stale one captured at queue-creation time.
   const runTurnRef = useRef<(text: string) => Promise<void>>(async () => {});
   runTurnRef.current = async (text: string) => {
-    // The user line lands in the transcript only when the turn actually starts,
-    // so queued-but-unsent messages stay in the dim "queued" list until then.
-    append({ id: nextId(), kind: "user", text });
-    setBusy(true);
+    if (!optimisticFlags.current.shift()) {
+      append({ id: nextId(), kind: "user", text });
+    }
     const buffer: Line[] = [];
     try {
       await session.sendTurn(text, (ev) => {
@@ -322,7 +347,6 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
       setCommitted((prev) => [...prev, ...buffer, { id: nextId(), kind: "cost", cost: c }]);
       setLive([]);
       setCost(c);
-      setBusy(false);
     }
   };
 
@@ -332,7 +356,7 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
   if (!queueRef.current) {
     queueRef.current = createTurnQueue({
       runTurn: (text) => runTurnRef.current(text),
-      onChange: setQueued,
+      onRunning: setProcessing,
     });
   }
 
@@ -365,12 +389,19 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
       return;
     }
 
-    // Everything else becomes a planner turn: enqueue and let the queue drain.
+    // Everything else becomes a planner turn. When the queue is idle this turn
+    // starts right away, so drop the user's line into the transcript immediately
+    // — optimistically — for instant feedback. When a turn is already running the
+    // message is queued and its line is appended when that turn starts (see
+    // runTurnRef), so it never jumps above the reply still streaming above it.
+    const optimistic = !queueRef.current!.isRunning();
+    if (optimistic) append({ id: nextId(), kind: "user", text });
+    optimisticFlags.current.push(optimistic);
     queueRef.current!.submit(text);
   }
 
   const footer = embedded
-    ? `Esc back · PgUp/PgDn scroll · /runs /prs /help /exit · ${usd(cost.total)}`
+    ? `${processing ? "Esc detach (keeps running)" : "Esc back"} · PgUp/PgDn scroll · /runs /prs /help /exit · ${usd(cost.total)}`
     : `/runs · /prs · /help · /exit · PgUp/PgDn scroll · Ctrl-C to quit · ${usd(cost.total)}`;
 
   // Transcript = committed history + the in-flight turn, as one scroll stream.
@@ -397,7 +428,6 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
     1 /* scroll region marginBottom */ +
     1 /* separator */ +
     1 /* newer-below hint (always reserved) */ +
-    queued.length +
     1 /* thinking line (always reserved) */ +
     1 /* prompt */ +
     1 /* footer */ +
@@ -446,13 +476,7 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
         {newerBelow && (
           <Text dimColor>{`  ⋯ ${len - endIdx} newer line(s) below · PgDn/↓ to catch up`}</Text>
         )}
-        {queued.length > 0 &&
-          queued.map((text, i) => (
-            <Text key={i} dimColor>
-              {"  queued: " + text}
-            </Text>
-          ))}
-        {busy && live.length === 0 && <Thinking />}
+        {processing && <Thinking />}
         <Prompt onSubmit={handleSubmit} isActive placeholder="ask the planner…" />
         <Text dimColor>{footer}</Text>
         <Horse running={workersRunning} />

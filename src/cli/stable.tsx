@@ -76,6 +76,10 @@ function Stable({ config }: { config: TackConfig }): React.ReactElement {
           session={mode.session}
           history={mode.history}
           onExit={() => leaveChat(mode.session)}
+          // Detaching mid-turn returns to the dashboard WITHOUT closing the
+          // session, so the in-flight turn keeps running in the background and
+          // the row stays live; reopening it later picks the conversation back up.
+          onDetach={back}
           embedded
         />
       );
