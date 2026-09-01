@@ -52,8 +52,8 @@ function Stable({ config }: { config: TackConfig }): React.ReactElement {
     }
   };
   const back = () => setMode({ name: "dashboard" });
-  // Leaving a chat is a clean exit for that session: stop its heartbeat and mark
-  // it closed so the dashboard stops showing it live. Reopening reactivates it.
+  // Leaving a chat is a clean exit for that session: stop its heartbeat and clear
+  // its liveness so the dashboard stops showing it live. Reopening reactivates it.
   const leaveChat = (session: PlannerSession) => {
     session.close();
     back();

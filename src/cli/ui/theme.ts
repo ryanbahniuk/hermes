@@ -52,19 +52,15 @@ export function runLive(r: RunRow): Live {
 const SESSION_STALE_MS = 60_000;
 
 /**
- * A session's *live* status, mirroring `runLive` for sessions. A closed session
- * reports "closed"; otherwise it's "active" only while its recorded pid is alive
- * AND its heartbeat is fresh. A session whose interactive process was killed or
- * crashed goes stale and reads "dead" — no longer masquerading as active.
+ * A session's *live* status, mirroring `runLive` for sessions. An archived session
+ * reports "archived"; otherwise it's "active" only while its recorded pid is alive
+ * AND its heartbeat is fresh. A session whose interactive process cleanly exited,
+ * was killed, or crashed reads "dead" — no longer masquerading as active.
  */
 export function sessionLive(s: SessionRow): Live {
-  // Archived supersedes/implies closed for display: it's a soft-hidden, finished
-  // state, so it reads gray+dim like closed but with its own label.
+  // Archived is a soft-hidden, finished state, so it reads gray+dim with its own label.
   if (s.status === "archived") {
     return { label: "archived", color: "gray", dim: true };
-  }
-  if (s.status === "closed") {
-    return { label: "closed", color: "gray", dim: true };
   }
   const fresh =
     s.heartbeat_at != null && Date.now() - Date.parse(s.heartbeat_at) < SESSION_STALE_MS;
@@ -114,7 +110,7 @@ export function runActions(r: RunRow): RowAction[] {
 
 /**
  * The destructive actions valid for a session *in its current live state*. Kill
- * only makes sense on an active session (a dead/closed one has nothing live to
+ * only makes sense on an active session (a dead one has nothing live to
  * signal); archive is offered only when every run is terminal (`allRunsTerminal`,
  * threaded in by the caller — the same gate {@link archiveSession} enforces, so
  * the offered affordance can't diverge from what the action allows); an already-
