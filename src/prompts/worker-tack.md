@@ -16,4 +16,4 @@ Shared coordination context (the cross-project contract — conform to it):
 {{sharedContext}}
 
 If you believe the contract is wrong, call propose_amendment (sparingly); otherwise conform.{{/if}}
-{{prBranch}}
+{{gitOperations}}

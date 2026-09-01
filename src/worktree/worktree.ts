@@ -42,11 +42,11 @@ export function sessionPrBranch(sessionId: string, slug: string): string {
  * can be discovered and tied back to its session. Returns empty when the task
  * has no session (e.g. a direct `tack run`) — nothing to associate to.
  */
-export function prBranchInstruction(sessionId: string | null | undefined): string {
+export function gitOperationsInstruction(sessionId: string | null | undefined): string {
   if (!sessionId) return "";
   // render() preserves the leading blank line (separator from the base prompt)
   // and trims the trailing newline, matching the previous joined-string form.
-  return render(templates.prBranch, { branch: sessionPrBranch(sessionId, "<short-slug>") });
+  return render(templates.gitOperations, { branch: sessionPrBranch(sessionId, "<short-slug>") });
 }
 
 /** Extracts the session id from a PR branch, or null if it isn't one of ours. */

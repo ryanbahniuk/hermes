@@ -9,7 +9,7 @@ import {
 import { createChatModel } from "../models/chat";
 import { createTackTools } from "../tools/tack-tools";
 import { createTackCoordinationTools } from "../tools/coordination";
-import { prBranchInstruction } from "../worktree/worktree";
+import { gitOperationsInstruction } from "../worktree/worktree";
 import { render, templates } from "../prompts";
 import { repoGuidance } from "./guidance";
 import type { AgentEvent, AgentRuntime, AgentTask } from "./types";
@@ -30,7 +30,7 @@ function systemPrompt(task: AgentTask): string {
     readAllowlist: task.scoping.readAllowlist.join(", ") || "(none)",
     repoGuidance: repoGuidance(task.scoping.worktree),
     sharedContext: task.sharedContext,
-    prBranch: prBranchInstruction(task.sessionId),
+    gitOperations: gitOperationsInstruction(task.sessionId),
   });
 }
 

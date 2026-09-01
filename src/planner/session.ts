@@ -187,7 +187,7 @@ function buildRuntime(
   const actions = createPlannerActions(config, sessionId, plannerRef);
   return selectPlannerRuntime({
     model,
-    systemPrompt: prompts.plannerSession,
+    systemPrompt: prompts.sessionPlanner,
     actions,
     scoping: plannerScoping(config),
     resumeRef,

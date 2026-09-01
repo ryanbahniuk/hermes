@@ -51,7 +51,7 @@ export async function plan(
 
   const projectList = config.projects.map((p) => `- ${p.name}: ${p.description}`).join("\n");
   const result = await structured.invoke([
-    new SystemMessage(prompts.orchestratorPlan),
+    new SystemMessage(prompts.runPlanner),
     new HumanMessage(`Problem:\n${problem}\n\nAvailable projects:\n${projectList}`),
   ]);
 

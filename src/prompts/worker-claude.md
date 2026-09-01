@@ -14,4 +14,4 @@ Shared coordination context (the cross-project contract — conform to it):
 
 Use the mcp__tack__read_shared_context tool to re-read it. If you believe the contract
 is wrong, call mcp__tack__propose_amendment (sparingly); otherwise conform.{{/if}}
-{{prBranch}}
+{{gitOperations}}

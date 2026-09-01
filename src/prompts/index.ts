@@ -4,17 +4,17 @@
 // module graph — baked into the compiled binary by `bun build --compile`, and
 // read from disk under `bun run`. So the markdown ships with the executable; no
 // filesystem access or path resolution is needed at runtime.
-import plannerSession from "./planner-session.md" with { type: "text" };
-import orchestratorPlan from "./orchestrator-plan.md" with { type: "text" };
+import sessionPlanner from "./session-planner.md" with { type: "text" };
+import runPlanner from "./run-planner.md" with { type: "text" };
 import adjudicate from "./adjudicate.md" with { type: "text" };
 import workerTack from "./worker-tack.md" with { type: "text" };
 import workerClaude from "./worker-claude.md" with { type: "text" };
-import prBranch from "./pr-branch.md" with { type: "text" };
+import gitOperations from "./git-operations.md" with { type: "text" };
 
 /** Static system prompts (no interpolation), trailing whitespace trimmed. */
 export const prompts = {
-  plannerSession: plannerSession.trimEnd(),
-  orchestratorPlan: orchestratorPlan.trimEnd(),
+  sessionPlanner: sessionPlanner.trimEnd(),
+  runPlanner: runPlanner.trimEnd(),
   adjudicate: adjudicate.trimEnd(),
 };
 
@@ -22,8 +22,8 @@ export const prompts = {
 export const templates = {
   workerTack,
   workerClaude,
-  /** Injected into worker prompts via `{{prBranch}}`; `{{branch}}` = the session PR branch. */
-  prBranch,
+  /** Injected into worker prompts via `{{gitOperations}}`; `{{branch}}` = the session PR branch. */
+  gitOperations,
 };
 
 /**

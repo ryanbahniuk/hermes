@@ -10,7 +10,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { assertReadable, assertWritable, type Scoping } from "../tools/ops";
-import { prBranchInstruction } from "../worktree/worktree";
+import { gitOperationsInstruction } from "../worktree/worktree";
 import { render, templates } from "../prompts";
 import { repoGuidance } from "./guidance";
 import { defaultRegion } from "../models/chat";
@@ -102,7 +102,7 @@ function systemAppend(task: AgentTask): string {
     readAllowlist: task.scoping.readAllowlist.join(", ") || "(none)",
     repoGuidance: repoGuidance(task.scoping.worktree),
     sharedContext: task.sharedContext,
-    prBranch: prBranchInstruction(task.sessionId),
+    gitOperations: gitOperationsInstruction(task.sessionId),
   });
 }
 
