@@ -18,7 +18,7 @@ import { useTerminalSize } from "./useTerminalSize";
 
 // ---- transcript model -----------------------------------------------------
 
-type Line =
+export type Line =
   | { id: string; kind: "user"; text: string }
   | { id: string; kind: "assistant"; text: string }
   | { id: string; kind: "error"; message: string }
@@ -104,6 +104,41 @@ function LineView({ line }: { line: Line }): React.ReactElement | null {
           })}
         </Box>
       );
+  }
+}
+
+// How many terminal rows a string occupies once word-wrapped to `cols`. Ink
+// wraps on word boundaries, so this (ceil of code-point width per hard-wrapped
+// segment) is a close lower bound; the row budget below keeps a safety margin so
+// occasional ragged wraps can't tip the transcript past the viewport.
+export function textRows(text: string, cols: number): number {
+  if (cols <= 0) return 1;
+  let rows = 0;
+  for (const segment of text.split("\n")) {
+    rows += Math.max(1, Math.ceil([...segment].length / cols));
+  }
+  return rows;
+}
+
+// The wrapped height of one transcript line, mirroring how LineView renders it:
+// the label prefix shares the wrapping `<Text>` with the body, user turns carry a
+// blank row above (marginTop), and the list kinds render one row per item.
+export function lineRows(line: Line, cols: number): number {
+  switch (line.kind) {
+    case "user":
+      return textRows("you › " + line.text, cols) + 1;
+    case "assistant":
+      return textRows("planner › " + line.text, cols);
+    case "error":
+      return textRows("  error: " + line.message, cols);
+    case "notice":
+      return textRows(line.text, cols);
+    case "cost":
+      return 1;
+    case "runs":
+      return Math.max(1, line.runs.length);
+    case "prs":
+      return Math.max(1, line.prs.length);
   }
 }
 
@@ -349,11 +384,36 @@ export function ChatView({ session, onExit, history = [], embedded = false }: Ch
   const endIdx = anchorIdx >= 0 ? anchorIdx + 1 : len; // exclusive slice bound
   const newerBelow = endIdx < len;
 
-  // Only render the tail that could be visible; the scroll region below clips
-  // the rest via flexbox (overflow hidden + flex-end), which bounds layout work
-  // on long sessions. The window ends at the anchor (or the latest line).
-  const windowSize = Math.max(rows, 40);
-  const visible = transcript.slice(Math.max(0, endIdx - windowSize), endIdx);
+  // Only render the tail that fits. This MUST be measured in wrapped terminal
+  // rows, not transcript lines: Ink repaints a fullscreen app by cursoring up over
+  // the prior frame, so if we emit more rows than the terminal has, the erase runs
+  // off the top of the screen and old and new frames ghost together (garbled,
+  // overlaid text). We reserve the pinned chrome's rows, then walk newest→oldest
+  // summing each line's wrapped height until the budget is spent — so the
+  // transcript box never outgrows its slot. `overflow="hidden"` stays as a
+  // backstop and the reserved margin absorbs word-wrap raggedness.
+  const horseRows = workersRunning ? 8 : 6; // gallop is taller than graze
+  const chromeRows =
+    1 /* scroll region marginBottom */ +
+    1 /* separator */ +
+    1 /* newer-below hint (always reserved) */ +
+    queued.length +
+    1 /* thinking line (always reserved) */ +
+    1 /* prompt */ +
+    1 /* footer */ +
+    horseRows;
+  const budget = Math.max(3, rows - chromeRows);
+
+  let usedRows = 0;
+  let startIdx = endIdx;
+  for (let i = endIdx - 1; i >= 0; i--) {
+    const h = lineRows(transcript[i], columns);
+    // Always keep at least the newest line, even if it alone overflows the budget.
+    if (startIdx < endIdx && usedRows + h > budget) break;
+    usedRows += h;
+    startIdx = i;
+  }
+  const visible = transcript.slice(startIdx, endIdx);
   const separator = "─".repeat(Math.max(0, columns));
 
   // Hand the key handler the current line ids and paging math.
